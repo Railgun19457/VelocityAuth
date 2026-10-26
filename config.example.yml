@@ -1,0 +1,97 @@
+# ============ VelocityAuth 配置模板 ============
+# 本文件为默认模板（无任何真实凭据）。首次启动时会被释放到
+#   plugins/velocityauth/config.yml
+# 真实配置（SMTP 授权码、QQ 群号、数据库密码、已配对公钥等）只存在于服务器上，
+# 请勿提交到版本库。
+
+language: zh_cn            # zh_cn | en_us
+
+database:
+  type: sqlite             # sqlite | mysql
+  sqlite:
+    file: velocityauth.db
+  mysql:
+    host: 127.0.0.1
+    port: 3306
+    database: velocityauth
+    username: root
+    password: ""
+
+servers:
+  login: lobby             # 登录服：未认证玩家停留的服务器
+  default: main            # 认证成功后默认进入的服务器
+  allowed:                 # 允许进入的子服（需为 Velocity 已注册的服务器名）
+    - main                 #   记忆功能只会在这份白名单内恢复
+    - survival
+  remember-last: true      # 认证后自动回到上次退出时所在的子服
+
+auth:
+  account-name:
+    min-length: 3
+    max-length: 16
+    pattern: "^[A-Za-z0-9_]+$"
+    case-insensitive: true
+  password:
+    min-length: 6
+    max-length: 64
+  bcrypt-cost: 10
+  session:
+    enabled: false                   # 默认关闭：国内 NAT 普遍，同 IP 免密风险高
+    ttl-minutes: 30
+    bind-to-ip: true
+  premium:
+    enabled: true
+    keep-real-uuid: true
+    require-password: false          # 正版玩家是否仍需 /login
+    name-conflict: first-come        # first-come | premium-priority
+
+registration:
+  gate: none                         # none | email | qq
+
+binding:
+  email:
+    enabled: true
+    max-accounts-per-email: 1
+    domain:
+      mode: whitelist                # off | whitelist | blacklist
+      list: ["qq.com"]
+  qq:
+    enabled: true
+    max-accounts-per-qq: 1
+
+verification:
+  email-code-length: 6
+  qq-code-length: 6
+  ttl-seconds: 300
+  max-attempts: 5
+  rate-limit:
+    per-ip-per-minute: 5
+    per-account-per-minute: 3
+
+smtp:
+  enabled: false                     # 需要邮箱验证/找回时再开
+  host: smtp.qq.com
+  port: 465
+  ssl: true
+  username: ""                       # 你的邮箱，如 example@qq.com
+  password: ""                       # QQ 邮箱需填授权码，不是登录密码
+  from: "VelocityAuth <example@qq.com>"
+  timeout-seconds: 10
+
+qqbot:
+  enabled: false                     # 需要 QQ 验证/绑定时再开
+  listen: "0.0.0.0"
+  port: 8765
+  group-id: ""                       # 验证用的 QQ 群号
+  require-group-member: true
+  pairing:
+    ttl-seconds: 600
+    max-attempts: 5
+
+proxy:
+  address: ""                        # 代理对外地址（transferToHost 用），留空则用 bind 地址
+  port: 0                            # 0 表示使用 velocity.toml 的 bind 端口
+
+security:
+  handshake-timeout-seconds: 10      # bot 握手超时
+  clock-skew-seconds: 120            # 握手帧时间偏差容忍

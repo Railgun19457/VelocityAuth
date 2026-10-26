@@ -1,0 +1,101 @@
+plugins {
+    id 'java'
+    id 'com.gradleup.shadow' version '9.6.1'
+}
+
+group = 'io.github.railgun19457'
+version = providers.gradleProperty('projectVersion').get()
+
+def javaRelease = providers.gradleProperty('javaRelease').get().toInteger()
+
+repositories {
+    mavenCentral()
+    maven { url = 'https://repo.papermc.io/repository/maven-public/' }
+    maven { url = 'https://repo.opencollab.dev/main/' }   // Floodgate
+}
+
+dependencies {
+    // 代理 API
+    compileOnly 'com.velocitypowered:velocity-api:3.5.1'
+    annotationProcessor 'com.velocitypowered:velocity-api:3.5.1'
+
+    // 基岩身份（可选软依赖）
+    compileOnly 'org.geysermc.floodgate:api:2.2.4-SNAPSHOT'
+
+    // 运行时依赖（shade + relocate）
+    implementation 'org.yaml:snakeyaml:2.2'
+    implementation 'com.google.code.gson:gson:2.11.0'
+    implementation 'at.favre.lib:bcrypt:0.10.2'
+    implementation 'com.zaxxer:HikariCP:5.1.0'
+    implementation 'org.xerial:sqlite-jdbc:3.46.1.3'
+    implementation 'com.mysql:mysql-connector-j:8.4.0'
+    implementation 'org.eclipse.angus:angus-mail:2.0.3'
+    implementation 'org.java-websocket:Java-WebSocket:1.5.7'
+
+    // 测试
+    testImplementation 'org.junit.jupiter:junit-jupiter:5.10.2'
+    testImplementation 'com.velocitypowered:velocity-api:3.5.1'
+    testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+}
+
+java {
+    sourceCompatibility = JavaVersion.toVersion(javaRelease)
+    targetCompatibility = JavaVersion.toVersion(javaRelease)
+}
+
+tasks.withType(JavaCompile).configureEach {
+    options.encoding = 'UTF-8'
+    options.release = javaRelease
+}
+
+// ---------- 生成 BuildConstants ----------
+def buildConstantsDir = layout.buildDirectory.dir('generated/sources/buildconstants/java')
+
+tasks.register('generateBuildConstants') {
+    def outDir = buildConstantsDir.get().asFile
+    def ver = project.version.toString()
+    def groupName = project.group.toString()
+    inputs.property('version', ver)
+    inputs.property('group', groupName)
+    outputs.dir(outDir)
+    doLast {
+        def pkgDir = new File(outDir, 'io/github/railgun19457/velocityauth')
+        pkgDir.mkdirs()
+        def body = '''package io.github.railgun19457.velocityauth;
+
+/** Generated at build time. Do not edit. */
+public final class BuildConstants {
+    public static final String ID = "velocityauth";
+    public static final String NAME = "VelocityAuth";
+    public static final String VERSION = "''' + ver + '''";
+    public static final String GROUP = "''' + groupName + '''";
+
+    private BuildConstants() {
+    }
+}
+'''
+        new File(pkgDir, 'BuildConstants.java').setText(body, 'UTF-8')
+    }
+}
+
+sourceSets.main.java.srcDir(buildConstantsDir)
+tasks.named('compileJava') { dependsOn 'generateBuildConstants' }
+
+tasks.named('test') { useJUnitPlatform() }
+
+tasks.named('jar') { archiveClassifier.set('plain') }
+
+shadowJar {
+    archiveClassifier.set('')
+    duplicatesStrategy = DuplicatesStrategy.INCLUDE
+    mergeServiceFiles()
+    relocate 'org.yaml.snakeyaml', 'io.github.railgun19457.velocityauth.lib.snakeyaml'
+    relocate 'com.google.gson',     'io.github.railgun19457.velocityauth.lib.gson'
+    relocate 'at.favre.lib',        'io.github.railgun19457.velocityauth.lib.bcrypt'
+    relocate 'com.zaxxer.hikari',   'io.github.railgun19457.velocityauth.lib.hikari'
+    relocate 'org.java_websocket',  'io.github.railgun19457.velocityauth.lib.ws'
+    relocate 'org.eclipse.angus',   'io.github.railgun19457.velocityauth.lib.mail'
+    relocate 'jakarta.mail',        'io.github.railgun19457.velocityauth.lib.mailapi'
+}
+
+build.dependsOn shadowJar

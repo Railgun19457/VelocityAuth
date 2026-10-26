@@ -1,0 +1,120 @@
+{
+  "note": "sealed frames use key_c2s / key_s2c from key_schedule",
+  "frames": [
+    {
+      "frame": {
+        "v": 1,
+        "kind": "plain",
+        "type": "auth.hello",
+        "id": "f_10",
+        "ts": 1730000000,
+        "nonce": "cHFyc3R1dnd4eXp7fH1-fw",
+        "payload": {
+          "client_id": "astrbot-1",
+          "client_key_id": "bot-k1",
+          "client_public_key_sha256": "Vkdap1RjR0wChd9dvyvKtz2mUTWIOem3dIGy6rEHcIw",
+          "client_ephemeral_key": "eaYx7t4b-cmPEgMs3q3Q56B5OY_HhriMyEbsia-FpRo",
+          "client_nonce": "UFFSU1RVVldYWVpbXF1eXw",
+          "capabilities": [
+            "verify.v1"
+          ]
+        },
+        "sig": "yYB6z4GdT_13P8YEeJ00qTYW9WIwqRrbTdW-Af0Gk0_gGuebmkgDS1m318qRpbQKP-0fIMbe3uA4--t2HhVNAw"
+      },
+      "signature_input": "VELOCITYAUTH-V1\ncontext=auth\ntype=auth.hello\nid=f_10\nts=1730000000\nnonce=cHFyc3R1dnd4eXp7fH1-fw\ncapabilities=verify.v1\nclient_ephemeral_key=eaYx7t4b-cmPEgMs3q3Q56B5OY_HhriMyEbsia-FpRo\nclient_id=astrbot-1\nclient_key_id=bot-k1\nclient_nonce=UFFSU1RVVldYWVpbXF1eXw\nclient_public_key_sha256=Vkdap1RjR0wChd9dvyvKtz2mUTWIOem3dIGy6rEHcIw\n"
+    },
+    {
+      "frame": {
+        "v": 1,
+        "kind": "plain",
+        "type": "auth.challenge",
+        "id": "f_11",
+        "ts": 1730000000,
+        "nonce": "gIGCg4SFhoeIiYqLjI2Ojw",
+        "payload": {
+          "challenge_id": "ch_9",
+          "expires_at": 1730000060,
+          "server_id": "velocity-1",
+          "server_key_id": "srv-k1",
+          "server_public_key_sha256": "JPbtasv-EAnAMNfKVnwzykgwkRSYI2tVYabIKr7F3ig",
+          "server_ephemeral_key": "Z13VdO13iTELPS52gfN5C0ZsdzsVIf7PNld5WDcepS8",
+          "server_nonce": "YGFiY2RlZmdoaWprbG1ubw",
+          "selected_v": 1,
+          "capabilities": [
+            "verify.v1"
+          ]
+        },
+        "sig": "O9eIpYn0zr9i7LvRWhhyhBWTsQOesnk7J08zOOpSS-KaE40lBx0foVt_JaVP3nfNejkNhPz7zNBdaiRarGDODQ"
+      },
+      "signature_input": "VELOCITYAUTH-V1\ncontext=auth\ntype=auth.challenge\nid=f_11\nts=1730000000\nnonce=gIGCg4SFhoeIiYqLjI2Ojw\ncapabilities=verify.v1\nchallenge_id=ch_9\nexpires_at=1730000060\nselected_v=1\nserver_ephemeral_key=Z13VdO13iTELPS52gfN5C0ZsdzsVIf7PNld5WDcepS8\nserver_id=velocity-1\nserver_key_id=srv-k1\nserver_nonce=YGFiY2RlZmdoaWprbG1ubw\nserver_public_key_sha256=JPbtasv-EAnAMNfKVnwzykgwkRSYI2tVYabIKr7F3ig\n"
+    },
+    {
+      "frame": {
+        "v": 1,
+        "kind": "plain",
+        "type": "auth.prove",
+        "id": "f_12",
+        "ts": 1730000000,
+        "nonce": "kJGSk5SVlpeYmZqbnJ2enw",
+        "payload": {
+          "challenge_id": "ch_9",
+          "hello_id": "f_10",
+          "client_id": "astrbot-1",
+          "client_key_id": "bot-k1",
+          "client_public_key_sha256": "Vkdap1RjR0wChd9dvyvKtz2mUTWIOem3dIGy6rEHcIw",
+          "client_ephemeral_key": "eaYx7t4b-cmPEgMs3q3Q56B5OY_HhriMyEbsia-FpRo",
+          "server_id": "velocity-1",
+          "server_key_id": "srv-k1",
+          "server_public_key_sha256": "JPbtasv-EAnAMNfKVnwzykgwkRSYI2tVYabIKr7F3ig",
+          "server_ephemeral_key": "Z13VdO13iTELPS52gfN5C0ZsdzsVIf7PNld5WDcepS8",
+          "client_nonce": "UFFSU1RVVldYWVpbXF1eXw",
+          "server_nonce": "YGFiY2RlZmdoaWprbG1ubw",
+          "selected_v": 1,
+          "client_capabilities_sha256": "42VkApbHPFKVEHtSQ7R-mehPZYrBO0JpbcnDR1deEDM",
+          "server_capabilities_sha256": "42VkApbHPFKVEHtSQ7R-mehPZYrBO0JpbcnDR1deEDM"
+        },
+        "sig": "-nanBzkRbh0IE0I6f6iY1BvcbWH5c6097nSdqlWJgZdV6wkO8idKyTwcBuK7piB-7r_rgIe--wRlUv62jPIXCA"
+      },
+      "signature_input": "VELOCITYAUTH-V1\ncontext=auth\ntype=auth.prove\nid=f_12\nts=1730000000\nnonce=kJGSk5SVlpeYmZqbnJ2enw\nchallenge_id=ch_9\nclient_capabilities_sha256=42VkApbHPFKVEHtSQ7R-mehPZYrBO0JpbcnDR1deEDM\nclient_ephemeral_key=eaYx7t4b-cmPEgMs3q3Q56B5OY_HhriMyEbsia-FpRo\nclient_id=astrbot-1\nclient_key_id=bot-k1\nclient_nonce=UFFSU1RVVldYWVpbXF1eXw\nclient_public_key_sha256=Vkdap1RjR0wChd9dvyvKtz2mUTWIOem3dIGy6rEHcIw\nhello_id=f_10\nselected_v=1\nserver_capabilities_sha256=42VkApbHPFKVEHtSQ7R-mehPZYrBO0JpbcnDR1deEDM\nserver_ephemeral_key=Z13VdO13iTELPS52gfN5C0ZsdzsVIf7PNld5WDcepS8\nserver_id=velocity-1\nserver_key_id=srv-k1\nserver_nonce=YGFiY2RlZmdoaWprbG1ubw\nserver_public_key_sha256=JPbtasv-EAnAMNfKVnwzykgwkRSYI2tVYabIKr7F3ig\n"
+    }
+  ],
+  "key_schedule": {
+    "shared_secret_b64url": "1vuTlRGyOBvIWZtLjtxZaIKUUN_XqHrr54pwPNBM1U4",
+    "salt": "lNJ3wJcWP5xToCT0xZ0x5OVsVX7-jnYdSNeutl5d3Os",
+    "prk": "oZm3C1USxekuwi97KbT8yygA8XfJ2k09FESwSi3waWc",
+    "key_c2s": "nqlWJ_Xz6VkaDx89OL3pt_Opdib0fvD92hqyQ-vvTuE",
+    "key_s2c": "h1h5d4xR0ulMnBVJsJ0LfZV6GcsbfsW7z3ZV7he2aIw"
+  },
+  "sealed": [
+    {
+      "direction": "s2c",
+      "seq": 0,
+      "epoch": 0,
+      "key": "key_s2c",
+      "nonce_b64url": "AAAAAAAAAAAAAAAA",
+      "aad": "VELOCITYAUTH-SEAL-V1\nv=1\nseq=0\n",
+      "plaintext": "VELOCITYAUTH-MSG-V1\ntype=auth.result\nid=f_13\nts=1730000000\ncapabilities=verify.v1\nok=true\nserver_time=1730000000\nsession_id=sess_1\n",
+      "ct": "G0Y-mJW1zAVGMmIT8XwHqEYBnIru5RzDXKvgIf6c_Guf_6xbDpQZ7KmLjPaq_4yN7y87Ulb9eDpvz4-_sX-oo-2p3V5VV4bxb2uCE_JILd_kgOpC9pTg6o85QVHek7bgHgFdjfVi_SCr2dra7z_gpisHFK3wn1TzdTy_gpFt7H-t7o97qkG39a4Xb9ythxHpsPhe"
+    },
+    {
+      "direction": "c2s",
+      "seq": 0,
+      "epoch": 0,
+      "key": "key_c2s",
+      "nonce_b64url": "AAAAAAAAAAAAAAAA",
+      "aad": "VELOCITYAUTH-SEAL-V1\nv=1\nseq=0\n",
+      "plaintext": "VELOCITYAUTH-MSG-V1\ntype=auth.confirm\nid=f_14\nts=1730000000\nsession_id=sess_1\n",
+      "ct": "ts5dTOduKAquGQhUiAAqfv8ip_rCsTSt9JN9VQVxLBQcziLhnUtpVJdoaWL64E49mDtOwPmmj8-mZAB4QDKSP_OgJ2iGSBa50wf6msXp_Vc9gOJdgoziwm2PpOf0Pg"
+    },
+    {
+      "direction": "s2c",
+      "seq": 1,
+      "epoch": 0,
+      "key": "key_s2c",
+      "nonce_b64url": "AAAAAAAAAAAAAAAB",
+      "aad": "VELOCITYAUTH-SEAL-V1\nv=1\nseq=1\n",
+      "plaintext": "VELOCITYAUTH-MSG-V1\ntype=verify.watch\nid=r_1\nts=1730000000\ncode=MC-8F3K2A\ngroup_id=123456\nttl=300\n",
+      "ct": "e1dppBTP-82_1MNcxWTKJf7znttgv0mfAlGrpC3gD-TwYSNC3IRdcfBRlfajA9_tB8lgHNoki8bku2rrgx9cnTqHMAYDNdBp6cqnDmQCjopQkXu4i2FpgEMSaE7JagQ-1TrQZBhc3vBirfH8J5voZdMA"
+    }
+  ]
+}

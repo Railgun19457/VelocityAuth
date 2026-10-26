@@ -1,0 +1,107 @@
+{
+  "note": "sig is Ed25519 over signature_input(...); code is NEVER transmitted",
+  "code": "kZ3r9Qm2vT7xLpW1bN6yHc4dFs8jA5eU",
+  "pairing_id": "01J8Z6Q0PAIRING0000000000",
+  "frames": [
+    {
+      "frame": {
+        "v": 1,
+        "kind": "plain",
+        "type": "pair.hello",
+        "id": "f_1",
+        "ts": 1730000000,
+        "nonce": "EBESExQVFhcYGRobHB0eHw",
+        "payload": {
+          "pairing_id": "01J8Z6Q0PAIRING0000000000",
+          "client_id": "astrbot-1",
+          "client_key_id": "bot-k1",
+          "client_public_key": "A6EHv_POEL4dcN0Y50vAmWfk1jCbpQ1fHdyGZBJVMbg",
+          "capabilities": [
+            "verify.v1"
+          ]
+        },
+        "sig": "lQexhnmPQc3gVUzn584od60YQtGYrqGIFC_ipQSLMcLHKEn6c88FqMnwNrd7CtaJuq7I1mJAqwUfetDEA34eBg"
+      },
+      "signature_input": "VELOCITYAUTH-V1\ncontext=pair\ntype=pair.hello\nid=f_1\nts=1730000000\nnonce=EBESExQVFhcYGRobHB0eHw\ncode=kZ3r9Qm2vT7xLpW1bN6yHc4dFs8jA5eU\ncapabilities=verify.v1\nclient_id=astrbot-1\nclient_key_id=bot-k1\nclient_public_key=A6EHv_POEL4dcN0Y50vAmWfk1jCbpQ1fHdyGZBJVMbg\npairing_id=01J8Z6Q0PAIRING0000000000\n"
+    },
+    {
+      "frame": {
+        "v": 1,
+        "kind": "plain",
+        "type": "pair.challenge",
+        "id": "f_2",
+        "ts": 1730000000,
+        "nonce": "ICEiIyQlJicoKSorLC0uLw",
+        "payload": {
+          "pairing_id": "01J8Z6Q0PAIRING0000000000",
+          "challenge_id": "ch_1",
+          "expires_at": 1730000600,
+          "server_id": "velocity-1",
+          "server_key_id": "srv-k1",
+          "server_public_key": "Kay64UG8yvCyLhqU000LxzYeUm0L_hLIl5S8kyKWbdc",
+          "server_nonce": "ICEiIyQlJicoKSorLC0uLw",
+          "selected_v": 1,
+          "capabilities": [
+            "verify.v1"
+          ]
+        },
+        "sig": "cHzX7HbnksHQtcZahH1YQubi-eiVLZ4dIKhNG9SvxCHYV3JCqF7D7FE47Kcbda7FTAsORL3WX8z5E5lEAIjvDQ"
+      },
+      "signature_input": "VELOCITYAUTH-V1\ncontext=pair\ntype=pair.challenge\nid=f_2\nts=1730000000\nnonce=ICEiIyQlJicoKSorLC0uLw\ncode=kZ3r9Qm2vT7xLpW1bN6yHc4dFs8jA5eU\ncapabilities=verify.v1\nchallenge_id=ch_1\nexpires_at=1730000600\npairing_id=01J8Z6Q0PAIRING0000000000\nselected_v=1\nserver_id=velocity-1\nserver_key_id=srv-k1\nserver_nonce=ICEiIyQlJicoKSorLC0uLw\nserver_public_key=Kay64UG8yvCyLhqU000LxzYeUm0L_hLIl5S8kyKWbdc\n"
+    },
+    {
+      "frame": {
+        "v": 1,
+        "kind": "plain",
+        "type": "pair.prove",
+        "id": "f_3",
+        "ts": 1730000000,
+        "nonce": "MDEyMzQ1Njc4OTo7PD0-Pw",
+        "payload": {
+          "pairing_id": "01J8Z6Q0PAIRING0000000000",
+          "challenge_id": "ch_1",
+          "hello_id": "f_1",
+          "client_id": "astrbot-1",
+          "client_key_id": "bot-k1",
+          "client_public_key_sha256": "Vkdap1RjR0wChd9dvyvKtz2mUTWIOem3dIGy6rEHcIw",
+          "server_id": "velocity-1",
+          "server_key_id": "srv-k1",
+          "server_public_key_sha256": "JPbtasv-EAnAMNfKVnwzykgwkRSYI2tVYabIKr7F3ig",
+          "client_nonce": "EBESExQVFhcYGRobHB0eHw",
+          "server_nonce": "ICEiIyQlJicoKSorLC0uLw",
+          "selected_v": 1,
+          "client_capabilities_sha256": "42VkApbHPFKVEHtSQ7R-mehPZYrBO0JpbcnDR1deEDM",
+          "server_capabilities_sha256": "42VkApbHPFKVEHtSQ7R-mehPZYrBO0JpbcnDR1deEDM"
+        },
+        "sig": "xj5EhpsFT6fhOJUxnUKgS6V4nQjMTo2pku7CMhn49Ogw0s4WpIU-_jTvsq2kW0hHrZ_b_qjgCbkTp5xe5pQWBQ"
+      },
+      "signature_input": "VELOCITYAUTH-V1\ncontext=pair\ntype=pair.prove\nid=f_3\nts=1730000000\nnonce=MDEyMzQ1Njc4OTo7PD0-Pw\ncode=kZ3r9Qm2vT7xLpW1bN6yHc4dFs8jA5eU\nchallenge_id=ch_1\nclient_capabilities_sha256=42VkApbHPFKVEHtSQ7R-mehPZYrBO0JpbcnDR1deEDM\nclient_id=astrbot-1\nclient_key_id=bot-k1\nclient_nonce=EBESExQVFhcYGRobHB0eHw\nclient_public_key_sha256=Vkdap1RjR0wChd9dvyvKtz2mUTWIOem3dIGy6rEHcIw\nhello_id=f_1\npairing_id=01J8Z6Q0PAIRING0000000000\nselected_v=1\nserver_capabilities_sha256=42VkApbHPFKVEHtSQ7R-mehPZYrBO0JpbcnDR1deEDM\nserver_id=velocity-1\nserver_key_id=srv-k1\nserver_nonce=ICEiIyQlJicoKSorLC0uLw\nserver_public_key_sha256=JPbtasv-EAnAMNfKVnwzykgwkRSYI2tVYabIKr7F3ig\n"
+    },
+    {
+      "frame": {
+        "v": 1,
+        "kind": "plain",
+        "type": "pair.complete",
+        "id": "f_4",
+        "ts": 1730000000,
+        "nonce": "QEFCQ0RFRkdISUpLTE1OTw",
+        "payload": {
+          "ok": true,
+          "pairing_id": "01J8Z6Q0PAIRING0000000000",
+          "session_id": "sess_pair_1",
+          "client_key_id": "bot-k1",
+          "client_key_fingerprint": "Vkdap1RjR0wChd9dvyvKtz2mUTWIOem3dIGy6rEHcIw",
+          "server_key_id": "srv-k1",
+          "server_key_fingerprint": "JPbtasv-EAnAMNfKVnwzykgwkRSYI2tVYabIKr7F3ig",
+          "server_time": 1730000000,
+          "selected_v": 1,
+          "capabilities": [
+            "verify.v1"
+          ]
+        },
+        "sig": "-9WLsPl9h5EZg6lMMr1hgURylNSgnhwEhvqsMoJfeOca6dyQPUP2w7iWKBEZiNCMB6zBb8a6JcUGbIJnE6CODA"
+      },
+      "signature_input": "VELOCITYAUTH-V1\ncontext=pair\ntype=pair.complete\nid=f_4\nts=1730000000\nnonce=QEFCQ0RFRkdISUpLTE1OTw\ncode=kZ3r9Qm2vT7xLpW1bN6yHc4dFs8jA5eU\ncapabilities=verify.v1\nclient_key_fingerprint=Vkdap1RjR0wChd9dvyvKtz2mUTWIOem3dIGy6rEHcIw\nclient_key_id=bot-k1\nok=true\npairing_id=01J8Z6Q0PAIRING0000000000\nselected_v=1\nserver_key_fingerprint=JPbtasv-EAnAMNfKVnwzykgwkRSYI2tVYabIKr7F3ig\nserver_key_id=srv-k1\nserver_time=1730000000\nsession_id=sess_pair_1\n"
+    }
+  ]
+}
