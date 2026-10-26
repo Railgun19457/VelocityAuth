@@ -84,7 +84,7 @@ public final class BindCommand extends PlayerCommandSupport {
         VerificationService.Start start = plugin.verifications().start(VerificationRequest
                 .builder(VerificationPurpose.BIND_EMAIL, VerificationChannel.EMAIL, player.getUniqueId())
                 .accountName(account.nameLower())
-                .connectionName(lower(player.getUsername()))
+                .connectionName(identityOf(player).identifier())
                 .ip(ip)
                 .target(email)
                 .data(Map.of("account_id", Long.toString(account.id())))
@@ -116,9 +116,10 @@ public final class BindCommand extends PlayerCommandSupport {
         VerificationService.Start start = plugin.verifications().start(VerificationRequest
                 .builder(VerificationPurpose.BIND_QQ, VerificationChannel.QQ, player.getUniqueId())
                 .accountName(account.nameLower())
-                .connectionName(lower(player.getUsername()))
+                .connectionName(identityOf(player).identifier())
                 .ip(ip)
                 .data(Map.of("account_id", Long.toString(account.id())))
+                .onDispatch(VerificationPrompts.dispatchHandler(plugin, player, null))
                 .build());
         if (!start.accepted()) {
             return;

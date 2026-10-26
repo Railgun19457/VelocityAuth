@@ -275,24 +275,17 @@ async function phaseBindEmail(session) {
 }
 
 async function phaseBindQq(session) {
-  console.log('\n--- QQ 绑定（M4/M6 之间：只验证出码与防绕过）---')
+  console.log('\n--- QQ 绑定（无 bot 连接时应提示服务不可用；完整 QQ 闭环见 M6）---')
   session.messages.length = 0
   session.chat('/bind qq')
-  const instruction = await session.waitMessage(/请在 QQ 群/, 20000)
-  check('绑定 QQ：出码提示', !!instruction, instruction || '（无响应）')
-  const line = await session.waitMessage(/MC-[A-Z0-9]+/, 10000)
-  const code = line ? (line.match(/MC-[A-Z0-9]+/) || [null])[0] : null
-  check('绑定 QQ：显示验证码', !!code, code || '（无响应）')
+  const unavailable = await session.waitMessage(/QQ 验证服务当前不可用/, 15000)
+  check('无 bot 连接时 QQ 渠道不可用', !!unavailable, unavailable || '（无响应）')
+  if (!unavailable) session.dump('bind-qq')
 
   session.messages.length = 0
-  session.chat(`/verify ${code}`)
-  const wrongChannel = await session.waitMessage(/需要在 QQ 群中完成/, 10000)
-  check('绑定 QQ：游戏内输入被拒绝（防绕过）', !!wrongChannel, wrongChannel || '（无响应）')
-
-  session.messages.length = 0
-  session.chat('/verify cancel')
-  const cancelled = await session.waitMessage(/已取消/, 10000)
-  check('绑定 QQ：可取消', !!cancelled, cancelled || '（无响应）')
+  session.chat('/verify MC-XXXXXX')
+  const noSession = await session.waitMessage(/没有进行中的验证/, 10000)
+  check('无会话时 /verify 提示正确', !!noSession, noSession || '（无响应）')
 }
 
 async function phaseRecovery() {

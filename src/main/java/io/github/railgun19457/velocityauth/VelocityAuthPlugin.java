@@ -22,6 +22,8 @@ import io.github.railgun19457.velocityauth.bot.BotQqGateway;
 import io.github.railgun19457.velocityauth.bot.BotServer;
 import io.github.railgun19457.velocityauth.bot.BotSession;
 import io.github.railgun19457.velocityauth.bot.KeyStore;
+import io.github.railgun19457.velocityauth.auth.IdentityResolver;
+import io.github.railgun19457.velocityauth.platform.FloodgateHook;
 import io.github.railgun19457.velocityauth.bot.PairingService;
 import io.github.railgun19457.velocityauth.command.CommandRegistrar;
 import io.github.railgun19457.velocityauth.config.ConfigService;
@@ -79,6 +81,8 @@ public final class VelocityAuthPlugin {
     private KeyStore keyStore;
     private PairingService pairingService;
     private BotServer botServer;
+    private FloodgateHook floodgate;
+    private IdentityResolver identityResolver;
 
     private volatile boolean enabled;
 
@@ -103,6 +107,8 @@ public final class VelocityAuthPlugin {
 
             this.storage = StorageService.open(config.database(), dataDirectory, logger);
             this.async = new AsyncExecutor();
+            this.floodgate = FloodgateHook.create(server, log);
+            this.identityResolver = new IdentityResolver(floodgate);
 
             AccountCache cache = new AccountCache(storage.accounts(), storage.identities(), log);
             cache.load();
@@ -293,6 +299,14 @@ public final class VelocityAuthPlugin {
 
     public BotServer botServer() {
         return botServer;
+    }
+
+    public FloodgateHook floodgate() {
+        return floodgate;
+    }
+
+    public IdentityResolver identities() {
+        return identityResolver;
     }
 
     /** 服务器名（用于邮件主题），取代理 MOTD 的纯文本。 */

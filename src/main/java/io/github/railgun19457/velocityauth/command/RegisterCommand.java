@@ -65,12 +65,12 @@ public final class RegisterCommand extends PlayerCommandSupport {
             return;
         }
 
-        String connectionNameLower = lower(player.getUsername());
+        var identity = identityOf(player);
         String ip = ipOf(player);
 
         if (!emailGate && !qqGate) {
-            plugin.authService().register(name, password, confirm, connectionNameLower, ip)
-                    .thenAccept(result -> handle(player, connectionNameLower, ip, result))
+            plugin.authService().register(name, password, confirm, identity, ip)
+                    .thenAccept(result -> handle(player, identity, ip, result))
                     .exceptionally(throwable -> {
                         plugin.log().error("注册命令异常", throwable);
                         player.sendMessage(plugin.lang().msg("generic.internal-error"));
@@ -81,9 +81,9 @@ public final class RegisterCommand extends PlayerCommandSupport {
 
         plugin.registrationFlow()
                 .begin(new RegistrationFlow.Request(player.getUniqueId(), name, password, email,
-                        connectionNameLower, ip,
+                        identity, ip,
                         VerificationPrompts.dispatchHandler(plugin, player, email)))
-                .thenAccept(started -> handleGated(player, connectionNameLower, ip, started))
+                .thenAccept(started -> handleGated(player, identity, ip, started))
                 .exceptionally(throwable -> {
                     plugin.log().error("注册命令异常", throwable);
                     player.sendMessage(plugin.lang().msg("generic.internal-error"));
@@ -91,7 +91,7 @@ public final class RegisterCommand extends PlayerCommandSupport {
                 });
     }
 
-    private void handleGated(Player player, String connectionNameLower, String ip,
+    private void handleGated(Player player, io.github.railgun19457.velocityauth.auth.IdentityResolver.Resolved identity, String ip,
                              RegistrationFlow.Started started) {
         if (!started.accepted()) {
             if (!started.notified()) {
@@ -104,7 +104,7 @@ public final class RegisterCommand extends PlayerCommandSupport {
         }
         started.completion().thenAccept(result -> {
             if (result.status() == AuthOutcomes.RegisterStatus.SUCCESS) {
-                plugin.authService().createPendingBinding(connectionNameLower, ip, result.account().id());
+                plugin.authService().createPendingBinding(identity.key(), ip, result.account().id());
                 player.sendMessage(plugin.lang().msg("command.register.success"));
                 plugin.reconnectService().reconnect(player, plugin.lang().msg("auth.login-disconnect"));
             } else {
@@ -113,9 +113,9 @@ public final class RegisterCommand extends PlayerCommandSupport {
         });
     }
 
-    private void handle(Player player, String connectionNameLower, String ip, AuthOutcomes.Register result) {
+    private void handle(Player player, io.github.railgun19457.velocityauth.auth.IdentityResolver.Resolved identity, String ip, AuthOutcomes.Register result) {
         if (result.status() == AuthOutcomes.RegisterStatus.SUCCESS) {
-            plugin.authService().createPendingBinding(connectionNameLower, ip, result.account().id());
+            plugin.authService().createPendingBinding(identity.key(), ip, result.account().id());
             player.sendMessage(plugin.lang().msg("command.register.success"));
             plugin.reconnectService().reconnect(player, plugin.lang().msg("auth.login-disconnect"));
             return;

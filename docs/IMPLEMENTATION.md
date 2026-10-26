@@ -461,3 +461,16 @@ player.sendMessage(msg);
   记录仍只存内存、用后即弃。
 - **代价**：配置里的码是长期静态值（不是随机生成），因此仅建议在无控制台环境下临时开启，
   配对完成后立即清空该字段（并撤销不再需要的 `client revoke`）。
+
+### ADR-15 基岩端身份用 Floodgate UUID，且 profile 重写必须排在 Floodgate 之后
+
+- **背景**：基岩玩家的连接名是 `.<gamertag>`（如 `.Steve`），若沿用 Java 的"连接名即身份"，
+  所有基岩玩家会互相顶号；另外 Floodgate 自己也监听 `GameProfileRequestEvent` 注入 profile（R2）。
+- **决定**：
+  1. 身份解析按端分流：`IdentityResolver` 判断 UUID 是否为 Floodgate ID，基岩端身份标识取
+     **Floodgate UUID**（写入 `identities.kind='bedrock'`），内存态 key 前缀 `bedrock:` / `java:` 互不碰撞。
+  2. profile 重写监听器使用 `@Subscribe(order = PostOrder.LAST)`，确保在 Floodgate 之后执行、重写生效。
+  3. 皮肤：重写时沿用 `original.getProperties()`，即把 Floodgate 注入的 `textures` 属性带过去（R3）。
+  4. Floodgate 未安装时全部降级（`FloodgateHook` 内所有 API 调用都在 `try/catch(Throwable)` 内）。
+- **未实测项（保留在 R2/R3）**：本项目测试环境未安装 Geyser/Floodgate，因此
+  "监听器顺序最终生效结果"与"基岩皮肤是否保留"仍需在装有 Geyser + Floodgate 的服务器上实测。

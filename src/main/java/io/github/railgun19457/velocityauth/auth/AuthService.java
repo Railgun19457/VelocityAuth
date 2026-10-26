@@ -98,7 +98,7 @@ public final class AuthService {
     // ------------------------------------------------------------------ 注册
 
     public CompletableFuture<AuthOutcomes.Register> register(String name, String password, String confirm,
-                                                            String connectionNameLower, String ip) {
+                                                            IdentityResolver.Resolved identity, String ip) {
         return async.supply(() -> {
             try {
                 VelocityAuthConfig cfg = config.get();
@@ -128,14 +128,14 @@ public final class AuthService {
                 long now = nowSeconds();
                 long accountId = storage.accounts().insert(name, nameLower, ProfileFactory.offlineUuid(nameLower),
                         hash, AccountStatus.ACTIVE, null, now);
-                storage.identities().upsert(accountId, IdentityKind.JAVA, connectionNameLower, now);
-                storage.audit().log(now, accountId, AuditEntry.REGISTER, ip, "connection=" + connectionNameLower);
+                storage.identities().upsert(accountId, identity.kind(), identity.identifier(), now);
+                storage.audit().log(now, accountId, AuditEntry.REGISTER, ip, "connection=" + identity.identifier() + " kind=" + identity.kind().dbValue());
 
                 Account account = storage.accounts().findById(accountId)
                         .orElseThrow(() -> new IllegalStateException("注册后无法读回账号"));
                 cache.put(account);
-                cache.indexIdentity(IdentityKind.JAVA, connectionNameLower, accountId);
-                log.info("新账号注册：{}（连接名 {}，IP {}）", account.name(), connectionNameLower, ip);
+                cache.indexIdentity(identity.kind(), identity.identifier(), accountId);
+                log.info("新账号注册：{}（连接名 {}，{} 端，IP {}）", account.name(), identity.identifier(), identity.kind().dbValue(), ip);
                 return AuthOutcomes.Register.success(account);
             } catch (RuntimeException e) {
                 log.error("注册失败：" + e.getMessage(), e);
@@ -147,7 +147,7 @@ public final class AuthService {
     // ------------------------------------------------------------------ 登录
 
     public CompletableFuture<AuthOutcomes.Login> login(String name, String password,
-                                                      String connectionNameLower, String ip) {
+                                                      IdentityResolver.Resolved identity, String ip) {
         return async.supply(() -> {
             try {
                 String nameLower = normalize(name);
@@ -171,18 +171,18 @@ public final class AuthService {
                 }
                 if (!hasher.verify(password, account.passwordHash())) {
                     storage.audit().log(nowSeconds(), account.id(), AuditEntry.LOGIN_FAILED, ip,
-                            "connection=" + connectionNameLower);
+                            "connection=" + identity.identifier());
                     return AuthOutcomes.Login.failure(AuthOutcomes.LoginStatus.WRONG_PASSWORD);
                 }
 
                 long now = nowSeconds();
                 storage.accounts().updateLastLogin(account.id(), now, ip);
-                storage.identities().upsert(account.id(), IdentityKind.JAVA, connectionNameLower, now);
-                storage.audit().log(now, account.id(), AuditEntry.LOGIN, ip, "connection=" + connectionNameLower);
+                storage.identities().upsert(account.id(), identity.kind(), identity.identifier(), now);
+                storage.audit().log(now, account.id(), AuditEntry.LOGIN, ip, "connection=" + identity.identifier());
 
                 Account refreshed = storage.accounts().findById(account.id()).orElse(account);
                 cache.put(refreshed);
-                cache.indexIdentity(IdentityKind.JAVA, connectionNameLower, account.id());
+                cache.indexIdentity(identity.kind(), identity.identifier(), account.id());
                 rateLimiter.reset("login:account:" + nameLower);
                 return AuthOutcomes.Login.success(refreshed);
             } catch (RuntimeException e) {
@@ -258,36 +258,36 @@ public final class AuthService {
 
     // ------------------------------------------------------------------ 重连绑定
 
-    public void createPendingBinding(String connectionNameLower, String ip, long accountId) {
-        pendingBindings.put(connectionNameLower, ip, accountId);
+    public void createPendingBinding(String identityKey, String ip, long accountId) {
+        pendingBindings.put(identityKey, ip, accountId);
     }
 
     /** 消费重连绑定（消费即删）。 */
-    public Optional<Account> consumePendingBinding(String connectionNameLower, String ip) {
-        return pendingBindings.consume(connectionNameLower, ip)
+    public Optional<Account> consumePendingBinding(String identityKey, String ip) {
+        return pendingBindings.consume(identityKey, ip)
                 .flatMap(id -> cache.byId(id).or(() -> storage.accounts().findById(id).map(account -> {
                     cache.put(account);
                     return account;
                 })));
     }
 
-    public boolean hasPendingBinding(String connectionNameLower, String ip) {
-        return pendingBindings.peek(connectionNameLower, ip).isPresent();
+    public boolean hasPendingBinding(String identityKey, String ip) {
+        return pendingBindings.peek(identityKey, ip).isPresent();
     }
 
     // ------------------------------------------------------------------ 会话保持
 
     /** 会话保持命中则返回账号（跳过 /login）。 */
-    public Optional<Account> resolveSessionLogin(String connectionNameLower, String ip) {
+    public Optional<Account> resolveSessionLogin(IdentityResolver.Resolved identity, String ip) {
         VelocityAuthConfig.Session sessionConfig = config.get().auth().session();
         if (!sessionConfig.enabled()) {
             return Optional.empty();
         }
-        Optional<Account> identity = cache.byIdentity(IdentityKind.JAVA, connectionNameLower);
-        if (identity.isEmpty()) {
+        Optional<Account> resolved = cache.byIdentity(identity.kind(), identity.identifier());
+        if (resolved.isEmpty()) {
             return Optional.empty();
         }
-        Account account = identity.get();
+        Account account = resolved.get();
         if (account.locked()) {
             return Optional.empty();
         }

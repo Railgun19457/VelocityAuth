@@ -25,10 +25,10 @@ public final class LoginCommand extends PlayerCommandSupport {
             player.sendMessage(plugin.lang().msg("command.login.usage"));
             return;
         }
-        String connectionNameLower = lower(player.getUsername());
+        var identity = identityOf(player);
         String ip = ipOf(player);
-        plugin.authService().login(args[0], args[1], connectionNameLower, ip)
-                .thenAccept(result -> handle(player, connectionNameLower, ip, result))
+        plugin.authService().login(args[0], args[1], identity, ip)
+                .thenAccept(result -> handle(player, identity, ip, result))
                 .exceptionally(throwable -> {
                     plugin.log().error("登录命令异常", throwable);
                     player.sendMessage(plugin.lang().msg("generic.internal-error"));
@@ -36,10 +36,10 @@ public final class LoginCommand extends PlayerCommandSupport {
                 });
     }
 
-    private void handle(Player player, String connectionNameLower, String ip, AuthOutcomes.Login result) {
+    private void handle(Player player, io.github.railgun19457.velocityauth.auth.IdentityResolver.Resolved identity, String ip, AuthOutcomes.Login result) {
         switch (result.status()) {
             case SUCCESS -> {
-                plugin.authService().createPendingBinding(connectionNameLower, ip, result.account().id());
+                plugin.authService().createPendingBinding(identity.key(), ip, result.account().id());
                 player.sendMessage(plugin.lang().msg("command.login.success"));
                 plugin.reconnectService().reconnect(player, plugin.lang().msg("auth.login-disconnect"));
             }

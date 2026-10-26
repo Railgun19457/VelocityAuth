@@ -41,12 +41,12 @@ public final class ForgotCommand extends PlayerCommandSupport {
             player.sendMessage(plugin.lang().msg("command.forgot.invalid-channel"));
             return;
         }
-        String connectionNameLower = lower(player.getUsername());
+        var identity = identityOf(player);
         String ip = ipOf(player);
 
         player.sendMessage(plugin.lang().msg("command.forgot.request-received"));
 
-        plugin.recovery().request(accountName, type, player.getUniqueId(), connectionNameLower, ip,
+        plugin.recovery().request(accountName, type, player.getUniqueId(), identity.identifier(), ip,
                         VerificationPrompts.dispatchHandler(plugin, player, null))
                 .thenAccept(start -> handle(player, start))
                 .exceptionally(throwable -> {

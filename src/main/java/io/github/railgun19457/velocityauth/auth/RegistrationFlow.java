@@ -51,7 +51,7 @@ public final class RegistrationFlow {
     }
 
     public record Request(UUID playerUuid, String name, String password, String email,
-                          String connectionNameLower, String ip,
+                          IdentityResolver.Resolved identity, String ip,
                           java.util.function.Consumer<io.github.railgun19457.velocityauth.verify.VerificationDispatch>
                                   onDispatch) {
     }
@@ -123,7 +123,7 @@ public final class RegistrationFlow {
             VerificationRequest verificationRequest = VerificationRequest
                     .builder(VerificationPurpose.REGISTER, channel, request.playerUuid())
                     .accountName(nameLower)
-                    .connectionName(request.connectionNameLower())
+                    .connectionName(request.identity().identifier())
                     .ip(request.ip())
                     .target(email)
                     .data(data)
@@ -165,7 +165,7 @@ public final class RegistrationFlow {
             long accountId = auth.storage().accounts().insert(name, nameLower,
                     ProfileFactory.offlineUuid(nameLower), hash, io.github.railgun19457.velocityauth.storage.model
                             .AccountStatus.ACTIVE, null, now);
-            auth.storage().identities().upsert(accountId, IdentityKind.JAVA, request.connectionNameLower(), now);
+            auth.storage().identities().upsert(accountId, request.identity().kind(), request.identity().identifier(), now);
 
             if (email != null) {
                 auth.storage().bindings().insert(accountId, BindingType.EMAIL, email, now, now);
@@ -181,16 +181,16 @@ public final class RegistrationFlow {
             }
 
             auth.storage().audit().log(now, accountId, AuditEntry.REGISTER, request.ip(),
-                    "connection=" + request.connectionNameLower() + " gate=" + session.channel().name()
+                    "connection=" + request.identity().identifier() + " kind=" + request.identity().kind().dbValue() + " gate=" + session.channel().name()
                             .toLowerCase(Locale.ROOT));
 
             Account account = auth.storage().accounts().findById(accountId)
                     .orElseThrow(() -> new IllegalStateException("注册后无法读回账号"));
             auth.cache().put(account);
-            auth.cache().indexIdentity(IdentityKind.JAVA, request.connectionNameLower(), accountId);
+            auth.cache().indexIdentity(request.identity().kind(), request.identity().identifier(), accountId);
             log.info("新账号注册（{} 验证）：{}（连接名 {}，IP {}）",
                     session.channel().name().toLowerCase(Locale.ROOT), account.name(),
-                    request.connectionNameLower(), request.ip());
+                    request.identity().identifier(), request.ip());
             return AuthOutcomes.Register.success(account);
         } catch (RuntimeException e) {
             log.error("验证后建号失败：" + e.getMessage(), e);

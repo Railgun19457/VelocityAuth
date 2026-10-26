@@ -54,7 +54,7 @@ public final class UnbindCommand extends PlayerCommandSupport {
         VerificationService.Start start = plugin.verifications().start(VerificationRequest
                 .builder(VerificationPurpose.UNBIND, channel, player.getUniqueId())
                 .accountName(account.nameLower())
-                .connectionName(lower(player.getUsername()))
+                .connectionName(identityOf(player).identifier())
                 .ip(ip)
                 .target(channel == VerificationChannel.EMAIL ? target : null)
                 .data(Map.of("account_id", Long.toString(account.id()), "type", type.dbValue()))

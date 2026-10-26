@@ -54,7 +54,7 @@ public final class ResetPasswordCommand extends PlayerCommandSupport {
             return;
         }
 
-        String connectionNameLower = lower(player.getUsername());
+        var identity = identityOf(player);
         String ip = ipOf(player);
         plugin.authService().forcePassword(accountId, newPassword, ip, AuditEntry.RECOVER)
                 .thenAccept(result -> {
@@ -63,7 +63,7 @@ public final class ResetPasswordCommand extends PlayerCommandSupport {
                         return;
                     }
                     player.sendMessage(plugin.lang().msg("command.resetpassword.success"));
-                    plugin.authService().createPendingBinding(connectionNameLower, ip, accountId);
+                    plugin.authService().createPendingBinding(identity.key(), ip, accountId);
                     plugin.reconnectService().reconnect(player, plugin.lang().msg("auth.login-disconnect"));
                 })
                 .exceptionally(throwable -> {

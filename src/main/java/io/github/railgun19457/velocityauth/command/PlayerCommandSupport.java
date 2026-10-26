@@ -55,6 +55,11 @@ public abstract class PlayerCommandSupport implements SimpleCommand {
         return true;
     }
 
+    /** 本次连接的身份（Java = 连接名小写；基岩 = Floodgate UUID）。 */
+    protected io.github.railgun19457.velocityauth.auth.IdentityResolver.Resolved identityOf(Player player) {
+        return plugin.identities().resolve(player.getUniqueId(), player.getUsername());
+    }
+
     protected String ipOf(Player player) {
         return Addresses.ipOf(player);
     }
