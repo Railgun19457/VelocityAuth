@@ -11,6 +11,7 @@ import com.velocitypowered.api.proxy.ProxyServer;
 import io.github.railgun19457.velocityauth.config.ConfigService;
 import io.github.railgun19457.velocityauth.config.VelocityAuthConfig;
 import io.github.railgun19457.velocityauth.lang.LangService;
+import io.github.railgun19457.velocityauth.storage.StorageService;
 import io.github.railgun19457.velocityauth.util.PluginLogger;
 import org.slf4j.Logger;
 
@@ -39,6 +40,8 @@ public final class VelocityAuthPlugin {
 
     private ConfigService configService;
     private LangService langService;
+    private StorageService storage;
+    private volatile boolean enabled;
 
     @Inject
     public VelocityAuthPlugin(ProxyServer server, Logger logger, @DataDirectory Path dataDirectory) {
@@ -59,20 +62,33 @@ public final class VelocityAuthPlugin {
             VelocityAuthConfig config = configService.load();
             this.langService = LangService.load(config.language(), getClass(), dataDirectory, logger);
 
+            this.storage = StorageService.open(config.database(), dataDirectory, logger);
+
+            this.enabled = true;
             log.info("VelocityAuth {} 已加载（语言 {}，数据库 {}）",
-                    BuildConstants.VERSION, langService.code(), config.database().type().name().toLowerCase());
+                    BuildConstants.VERSION, langService.code(), storage.describe());
             log.info("服务器映射：登录服={} 主服={} 记忆上次子服={}",
                     config.servers().login(), config.servers().defaultServer(), config.servers().rememberLast());
         } catch (IOException e) {
             log.error("启动失败：无法读取配置或语言文件", e);
         } catch (RuntimeException e) {
             log.error("启动失败：" + e.getMessage(), e);
+        } catch (java.sql.SQLException e) {
+            log.error("启动失败：数据库不可用（" + e.getMessage() + "）", e);
         }
     }
 
     @Subscribe
     public void onProxyShutdown(ProxyShutdownEvent event) {
+        this.enabled = false;
+        if (storage != null) {
+            storage.close();
+        }
         log.info("VelocityAuth 正在卸载…");
+    }
+
+    public boolean enabled() {
+        return enabled;
     }
 
     /** 热重载配置与语言文件；失败时抛出，调用方负责提示。 */
@@ -99,6 +115,10 @@ public final class VelocityAuthPlugin {
 
     public VelocityAuthConfig config() {
         return configService.config();
+    }
+
+    public StorageService storage() {
+        return storage;
     }
 
     public LangService lang() {

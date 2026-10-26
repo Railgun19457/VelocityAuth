@@ -1,0 +1,5 @@
+# 统一换行：源码以 LF 存储，避免跨平台 CRLF 噪音
+* text=auto eol=lf
+*.jar binary
+*.db binary
+*.png binary
