@@ -11,10 +11,12 @@ import com.velocitypowered.api.proxy.ProxyServer;
 import io.github.railgun19457.velocityauth.auth.AccountCache;
 import io.github.railgun19457.velocityauth.auth.AuthService;
 import io.github.railgun19457.velocityauth.auth.AuthSessionRegistry;
+import io.github.railgun19457.velocityauth.auth.BindingService;
 import io.github.railgun19457.velocityauth.auth.PasswordHasher;
 import io.github.railgun19457.velocityauth.auth.PendingBindingStore;
 import io.github.railgun19457.velocityauth.auth.RateLimiter;
 import io.github.railgun19457.velocityauth.auth.ReconnectService;
+import io.github.railgun19457.velocityauth.auth.RecoveryService;
 import io.github.railgun19457.velocityauth.auth.RegistrationFlow;
 import io.github.railgun19457.velocityauth.command.CommandRegistrar;
 import io.github.railgun19457.velocityauth.config.ConfigService;
@@ -67,6 +69,8 @@ public final class VelocityAuthPlugin {
     private ReconnectService reconnectService;
     private VerificationService verificationService;
     private RegistrationFlow registrationFlow;
+    private BindingService bindingService;
+    private RecoveryService recoveryService;
 
     private volatile boolean enabled;
 
@@ -111,6 +115,8 @@ public final class VelocityAuthPlugin {
                     (task, delay) -> server.getScheduler().buildTask(this, task).delay(delay).schedule(),
                     async, log);
             this.registrationFlow = new RegistrationFlow(this::config, authService, verificationService, async, log);
+            this.bindingService = new BindingService(this::config, storage, async, log);
+            this.recoveryService = new RecoveryService(this::config, storage, verificationService, async, log);
 
             registerListeners();
             new CommandRegistrar(this, sessionRegistry).registerPlayerCommands();
@@ -119,6 +125,7 @@ public final class VelocityAuthPlugin {
                     .buildTask(this, () -> {
                         authService.purgeExpired();
                         verificationService.purgeExpired();
+                        recoveryService.purgeExpired();
                     })
                     .repeat(Duration.ofSeconds(60))
                     .schedule();
@@ -218,6 +225,14 @@ public final class VelocityAuthPlugin {
 
     public RegistrationFlow registrationFlow() {
         return registrationFlow;
+    }
+
+    public BindingService bindings() {
+        return bindingService;
+    }
+
+    public RecoveryService recovery() {
+        return recoveryService;
     }
 
     /** 服务器名（用于邮件主题），取代理 MOTD 的纯文本。 */

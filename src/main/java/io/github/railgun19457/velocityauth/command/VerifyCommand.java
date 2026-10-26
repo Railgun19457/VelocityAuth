@@ -45,6 +45,7 @@ public final class VerifyCommand extends PlayerCommandSupport {
             }
             case EXPIRED -> player.sendMessage(plugin.lang().msg("verification.expired"));
             case TOO_MANY_ATTEMPTS -> player.sendMessage(plugin.lang().msg("verification.too-many-attempts"));
+            case WRONG_CHANNEL -> player.sendMessage(plugin.lang().msg("verification.wrong-channel"));
         }
     }
 

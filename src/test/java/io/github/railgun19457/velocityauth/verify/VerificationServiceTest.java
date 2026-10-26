@@ -181,6 +181,15 @@ class VerificationServiceTest {
     }
 
     @Test
+    void inGameSubmissionCannotCompleteQqSession() {
+        VerificationService.Start start = start(VerificationChannel.QQ, VerificationPurpose.BIND_QQ);
+        assertEquals(VerificationService.SubmitOutcome.WRONG_CHANNEL,
+                service.submitCode(start.session().playerUuid(), start.session().code()));
+        assertFalse(start.completion().isDone(), "QQ 渠道只能由群消息命中完成");
+        assertEquals(3, start.session().remainingAttempts(), "不应消耗尝试次数");
+    }
+
+    @Test
     void dispatchCallbackReportsQqWatching() {
         List<VerificationDispatch> dispatches = new ArrayList<>();
         VerificationService.Start start = service.start(VerificationRequest

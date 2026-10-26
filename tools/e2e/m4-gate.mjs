@@ -291,8 +291,8 @@ async function phaseQqGate() {
 
   s.messages.length = 0
   s.chat('/verify MC-XXXXXX')
-  const wrong = await s.waitMessage(/验证码错误/, 10000)
-  check('错误验证码被拒绝', !!wrong, wrong || '（无响应）')
+  const wrong = await s.waitMessage(/需要在 QQ 群中完成/, 10000)
+  check('游戏内输入被拒绝（防绕过）', !!wrong, wrong || '（无响应）')
 
   s.messages.length = 0
   s.chat('/verify cancel')
@@ -316,7 +316,7 @@ async function phaseQqGate() {
   const expired = await s.waitMessage(/已过期|没有进行中的验证/, 10000)
   check('会话超时后失效', !!expired, expired || '（无响应）')
 
-  // 重新发起并用正确码完成
+  // 重新发起后用正确码在游戏内尝试完成 —— 必须被拒绝（QQ 渠道只能由群消息命中，否则验证形同虚设）
   s.messages.length = 0
   s.chat(`/register ${ACCOUNT} ${PASSWORD}`)
   const third = await s.waitMessage(/请在 QQ 群/, 20000)
@@ -325,16 +325,15 @@ async function phaseQqGate() {
   const code2 = line2 ? (line2.match(/MC-[A-Z0-9]+/) || [null])[0] : null
   s.messages.length = 0
   s.chat(`/verify ${code2}`)
-  const success = await s.waitMessage(/注册成功/, 20000)
-  check('QQ 验证通过后建号', !!success, success || '（无响应）')
-  if (!success) s.dump('qq-register')
-  await s.waitEnd(20000)
-  s.quit()
-  await sleep(SETTLE)
+  const wrongChannel = await s.waitMessage(/需要在 QQ 群中完成/, 10000)
+  check('游戏内输入 QQ 验证码被拒绝（防绕过）', !!wrongChannel, wrongChannel || '（无响应）')
+  check('账号未被创建', !s.messages.some((m) => /注册成功/.test(m)), '')
 
-  const s2 = await connectAs(nameC)
-  check(`profile 重写为 ${ACCOUNT}`, s2.profileName === ACCOUNT, `实际=${s2.profileName}`)
-  s2.quit()
+  s.messages.length = 0
+  s.chat(`/login ${ACCOUNT} ${PASSWORD}`)
+  const notExist = await s.waitMessage(/账号或密码错误/, 10000)
+  check('账号确实未创建', !!notExist, notExist || '（无响应）')
+  s.quit()
   await sleep(SETTLE)
 }
 

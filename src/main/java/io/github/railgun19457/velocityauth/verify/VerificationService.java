@@ -191,14 +191,20 @@ public final class VerificationService {
         /** 已过期。 */
         EXPIRED,
         /** 尝试次数超限。 */
-        TOO_MANY_ATTEMPTS
+        TOO_MANY_ATTEMPTS,
+        /** 该验证必须在 QQ 群内完成，游戏内输入无效。 */
+        WRONG_CHANNEL
     }
 
-    /** 游戏内输入验证码（email 渠道 / 手动输入）。 */
+    /** 游戏内输入验证码（仅 email 渠道；qq 渠道必须由 bot 回报群消息命中）。 */
     public SubmitOutcome submitCode(UUID playerUuid, String input) {
         VerificationSession session = byPlayer.get(playerUuid);
         if (session == null || session.finished()) {
             return SubmitOutcome.NO_SESSION;
+        }
+        // 安全：QQ 渠道的码在公开群里传播，若允许游戏内直接输入就完全失去了"证明持有该 QQ"的意义
+        if (session.channel() == VerificationChannel.QQ) {
+            return SubmitOutcome.WRONG_CHANNEL;
         }
         if (session.expired()) {
             finish(session, VerificationResult.Status.EXPIRED, "expired");

@@ -442,3 +442,11 @@ player.sendMessage(msg);
 - **决定**：`VerificationService.finish()` 使用 `CompletableFuture.completeAsync(..., executor)`，
   在插件的虚拟线程执行器上完成，保证命令线程先返回、提示先送达。
 - **代价**：建号等落库操作在异步线程执行（本来就应如此）。
+
+### ADR-13 QQ 渠道的验证码**不能**在游戏内提交
+
+- **背景**：QQ 验证码会在公开群里出现，玩家的客户端也会显示它。若允许 `/verify <码>` 在游戏内直接完成
+  QQ 渠道的会话，任何看到群消息的人（或玩家本人不经过 QQ）都能通过验证，**"证明持有该 QQ" 的语义完全失效**。
+- **决定**：`VerificationService.submitCode()` 对 `channel = QQ` 的会话一律返回 `WRONG_CHANNEL`，
+  不消耗尝试次数、不完成会话；QQ 渠道只能由 bot 的 `verify.matched`（群成员校验通过）完成。
+- **影响**：`/verify <码>` 只服务于 email 渠道；QQ 渠道的提示文案改为"请在群里发送验证码"。

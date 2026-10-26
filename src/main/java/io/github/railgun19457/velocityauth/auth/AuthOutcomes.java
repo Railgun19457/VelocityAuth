@@ -76,4 +76,33 @@ public final class AuthOutcomes {
             return status == ChangePasswordStatus.SUCCESS;
         }
     }
+
+    public enum BindStatus {
+        SUCCESS,
+        ALREADY_BOUND,
+        NOT_BOUND,
+        EMAIL_INVALID,
+        DOMAIN_NOT_ALLOWED,
+        EMAIL_LIMIT,
+        QQ_LIMIT,
+        DISABLED,
+        VERIFICATION_CANCELLED,
+        VERIFICATION_EXPIRED,
+        VERIFICATION_FAILED,
+        ERROR
+    }
+
+    public record Bind(BindStatus status, String value) {
+        public static Bind success(String value) {
+            return new Bind(BindStatus.SUCCESS, value);
+        }
+
+        public static Bind failure(BindStatus status) {
+            return new Bind(status, null);
+        }
+
+        public boolean ok() {
+            return status == BindStatus.SUCCESS;
+        }
+    }
 }

@@ -22,6 +22,7 @@ public final class CommandGuardListener {
             "register", "reg",
             "forgot",
             "verify",
+            "resetpassword", "resetpw",
             "velocityauth", "vauth");
 
     private final VelocityAuthPlugin plugin;
