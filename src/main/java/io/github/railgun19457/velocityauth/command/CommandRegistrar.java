@@ -29,6 +29,7 @@ public final class CommandRegistrar {
         register("unbind", new UnbindCommand(plugin, registry));
         register("forgot", new ForgotCommand(plugin, registry));
         register("resetpassword", new ResetPasswordCommand(plugin, registry), "resetpw");
+        register("velocityauth", new AdminCommand(plugin), "vauth");
     }
 
     private void register(String name, SimpleCommand command, String... aliases) {

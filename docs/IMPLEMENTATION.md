@@ -450,3 +450,14 @@ player.sendMessage(msg);
 - **决定**：`VerificationService.submitCode()` 对 `channel = QQ` 的会话一律返回 `WRONG_CHANNEL`，
   不消耗尝试次数、不完成会话；QQ 渠道只能由 bot 的 `verify.matched`（群成员校验通过）完成。
 - **影响**：`/verify <码>` 只服务于 email 渠道；QQ 渠道的提示文案改为"请在群里发送验证码"。
+
+### ADR-14 无控制台部署的配对引导（`qqbot.pairing.bootstrap-code`）
+
+- **背景**：配对码由 `/velocityauth pair new` 生成并只在控制台显示；但容器/无 TTY 环境下
+  Velocity 的控制台**不读取重定向的 stdin**（已实测：命令无任何响应），服主无法执行该命令。
+- **决定**：新增可选配置 `qqbot.pairing.bootstrap-code`。非空时插件在启动时用它创建一条**一次性**配对记录
+  （TTL、限次与 `/pair new` 完全一致），日志只记录 `pairing_id`，**绝不记录配对码本身**。
+- **理由**：不引入任何"测试专用"代码路径；配对码由服主自己写入配置文件，插件不打印它；
+  记录仍只存内存、用后即弃。
+- **代价**：配置里的码是长期静态值（不是随机生成），因此仅建议在无控制台环境下临时开启，
+  配对完成后立即清空该字段（并撤销不再需要的 `client revoke`）。

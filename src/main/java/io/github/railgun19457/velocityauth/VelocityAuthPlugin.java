@@ -18,6 +18,11 @@ import io.github.railgun19457.velocityauth.auth.RateLimiter;
 import io.github.railgun19457.velocityauth.auth.ReconnectService;
 import io.github.railgun19457.velocityauth.auth.RecoveryService;
 import io.github.railgun19457.velocityauth.auth.RegistrationFlow;
+import io.github.railgun19457.velocityauth.bot.BotQqGateway;
+import io.github.railgun19457.velocityauth.bot.BotServer;
+import io.github.railgun19457.velocityauth.bot.BotSession;
+import io.github.railgun19457.velocityauth.bot.KeyStore;
+import io.github.railgun19457.velocityauth.bot.PairingService;
 import io.github.railgun19457.velocityauth.command.CommandRegistrar;
 import io.github.railgun19457.velocityauth.config.ConfigService;
 import io.github.railgun19457.velocityauth.config.VelocityAuthConfig;
@@ -71,6 +76,9 @@ public final class VelocityAuthPlugin {
     private RegistrationFlow registrationFlow;
     private BindingService bindingService;
     private RecoveryService recoveryService;
+    private KeyStore keyStore;
+    private PairingService pairingService;
+    private BotServer botServer;
 
     private volatile boolean enabled;
 
@@ -108,12 +116,14 @@ public final class VelocityAuthPlugin {
             this.sessionRegistry = new AuthSessionRegistry();
 
             SmtpSender smtpSender = new SmtpSender(this::config, async, log);
-            QqVerificationGateway qqGateway = new StubQqGateway(
-                    () -> config.qqbot().enabled() && !config.qqbot().groupId().isBlank(), log);
+            this.keyStore = KeyStore.load(dataDirectory, log);
+            this.pairingService = new PairingService();
+            QqVerificationGateway qqGateway = new BotQqGateway(this::config, () -> botServer);
             this.verificationService = new VerificationService(this::config, this::lang, this::serverName,
                     smtpSender, qqGateway, rateLimiter,
                     (task, delay) -> server.getScheduler().buildTask(this, task).delay(delay).schedule(),
                     async, log);
+            startBotServer();
             this.registrationFlow = new RegistrationFlow(this::config, authService, verificationService, async, log);
             this.bindingService = new BindingService(this::config, storage, async, log);
             this.recoveryService = new RecoveryService(this::config, storage, verificationService, async, log);
@@ -153,9 +163,47 @@ public final class VelocityAuthPlugin {
         server.getEventManager().register(this, new PlayerLifecycleListener(this, sessionRegistry, routingListener));
     }
 
+    private void startBotServer() {
+        VelocityAuthConfig.QqBot settings = config().qqbot();
+        if (!settings.enabled()) {
+            log.info("QQ bot 通道未启用（qqbot.enabled=false）");
+            return;
+        }
+        // 无控制台部署：可用 config.yml 的 bootstrap-code 预置一次配对
+        String bootstrapCode = settings.pairing().bootstrapCode();
+        if (bootstrapCode != null && !bootstrapCode.isBlank()) {
+            PairingService.Created created = pairingService.createWithCode(bootstrapCode,
+                    settings.pairing().ttlSeconds(), settings.pairing().maxAttempts());
+            // 只记录 pairing_id，绝不记录配对码本身
+            log.info("已按配置预置配对（bootstrap）：pairing_id={}，TTL {} 秒",
+                    created.pairingId(), created.ttlSeconds());
+        }
+        this.botServer = new BotServer(settings, keyStore, pairingService, this::config, log,
+                new BotServer.Handler() {
+                    @Override
+                    public boolean onVerifyMatched(String code, String qq, String groupId, boolean groupMember) {
+                        return verificationService.onQqMatched(code, qq, groupId, groupMember);
+                    }
+
+                    @Override
+                    public void onSessionReady(BotSession session) {
+                        log.info("bot 会话就绪：client_id={}", session.clientId());
+                    }
+                });
+        try {
+            this.botServer.start();
+        } catch (RuntimeException e) {
+            log.error("启动 bot 通道失败：" + e.getMessage(), e);
+            this.botServer = null;
+        }
+    }
+
     @Subscribe
     public void onProxyShutdown(ProxyShutdownEvent event) {
         this.enabled = false;
+        if (botServer != null) {
+            botServer.shutdown();
+        }
         if (async != null) {
             async.close();
         }
@@ -233,6 +281,18 @@ public final class VelocityAuthPlugin {
 
     public RecoveryService recovery() {
         return recoveryService;
+    }
+
+    public KeyStore keyStore() {
+        return keyStore;
+    }
+
+    public PairingService pairings() {
+        return pairingService;
+    }
+
+    public BotServer botServer() {
+        return botServer;
     }
 
     /** 服务器名（用于邮件主题），取代理 MOTD 的纯文本。 */

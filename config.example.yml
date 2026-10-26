@@ -87,6 +87,7 @@ qqbot:
   pairing:
     ttl-seconds: 600
     max-attempts: 5
+    bootstrap-code: ""                 # 无控制台部署时可用：预置一次性配对码（只存内存，用后即弃）
 
 proxy:
   address: ""                        # 代理对外地址（transferToHost 用），留空则用 bind 地址

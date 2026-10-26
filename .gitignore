@@ -26,3 +26,5 @@ out/
 # ============ 测试工具 ============
 tools/e2e/node_modules/
 tools/e2e/*.log
+tools/e2e/pairing.json
+tools/e2e/.bot-state.json

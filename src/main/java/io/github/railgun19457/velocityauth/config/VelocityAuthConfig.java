@@ -96,7 +96,7 @@ public record VelocityAuthConfig(
                         Pairing pairing) {
     }
 
-    public record Pairing(int ttlSeconds, int maxAttempts) {
+    public record Pairing(int ttlSeconds, int maxAttempts, String bootstrapCode) {
     }
 
     // ---------------------------------------------------------------- proxy / security
@@ -252,7 +252,8 @@ public record VelocityAuthConfig(
                 qqbotNode.bool("require-group-member", true),
                 new Pairing(
                         pairingNode.intValue("ttl-seconds", 600),
-                        pairingNode.intValue("max-attempts", 5)));
+                        pairingNode.intValue("max-attempts", 5),
+                        pairingNode.string("bootstrap-code", "")));
 
         ConfigNode proxyNode = root.section("proxy");
         Proxy proxy = new Proxy(
