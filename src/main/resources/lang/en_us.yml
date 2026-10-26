@@ -132,6 +132,7 @@ admin:
     sessions: "<gray>Authenticated sessions: </gray><white>{value}</white>"
     pending-verifications: "<gray>Pending verifications: </gray><white>{value}</white>"
     paired-clients: "<gray>Paired bot clients: </gray><white>{value}</white>"
+    floodgate: "<gray>Bedrock (Floodgate): </gray><white>{value}</white>"
     enabled: "<green>enabled</green>"
     disabled: "<red>disabled</red>"
     connected: "<green>connected</green>"

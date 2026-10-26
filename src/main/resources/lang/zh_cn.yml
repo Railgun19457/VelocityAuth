@@ -132,6 +132,7 @@ admin:
     sessions: "<gray>在线已认证会话：</gray><white>{value}</white>"
     pending-verifications: "<gray>进行中的验证：</gray><white>{value}</white>"
     paired-clients: "<gray>已配对 bot 客户端：</gray><white>{value}</white>"
+    floodgate: "<gray>基岩端（Floodgate）：</gray><white>{value}</white>"
     enabled: "<green>已启用</green>"
     disabled: "<red>已关闭</red>"
     connected: "<green>已连接</green>"
