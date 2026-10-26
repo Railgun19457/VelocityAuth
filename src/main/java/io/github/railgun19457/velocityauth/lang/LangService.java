@@ -133,7 +133,7 @@ public final class LangService {
         return applyPlaceholders(rawText(key), placeholders);
     }
 
-    static String applyPlaceholders(String template, Object... placeholders) {
+    public static String applyPlaceholders(String template, Object... placeholders) {
         if (placeholders == null || placeholders.length == 0) {
             return template;
         }

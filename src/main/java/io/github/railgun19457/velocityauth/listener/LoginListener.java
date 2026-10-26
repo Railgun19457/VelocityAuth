@@ -1,0 +1,103 @@
+package io.github.railgun19457.velocityauth.listener;
+
+import com.velocitypowered.api.event.Subscribe;
+import com.velocitypowered.api.event.connection.PreLoginEvent;
+import com.velocitypowered.api.event.player.GameProfileRequestEvent;
+import com.velocitypowered.api.util.GameProfile;
+import io.github.railgun19457.velocityauth.VelocityAuthPlugin;
+import io.github.railgun19457.velocityauth.auth.AuthSession;
+import io.github.railgun19457.velocityauth.auth.AuthSessionRegistry;
+import io.github.railgun19457.velocityauth.auth.ProfileFactory;
+import io.github.railgun19457.velocityauth.config.VelocityAuthConfig;
+import io.github.railgun19457.velocityauth.storage.model.Account;
+import io.github.railgun19457.velocityauth.util.Addresses;
+
+import java.util.Locale;
+import java.util.Optional;
+
+/**
+ * 登录握手阶段：profile 重写与未认证标记。
+ * <p>
+ * {@code GameProfileRequestEvent} 是唯一能改 name/UUID 的公开 API，也是唯一身份改写点。
+ */
+public final class LoginListener {
+
+    private final VelocityAuthPlugin plugin;
+    private final AuthSessionRegistry registry;
+
+    public LoginListener(VelocityAuthPlugin plugin, AuthSessionRegistry registry) {
+        this.plugin = plugin;
+        this.registry = registry;
+    }
+
+    /**
+     * 正版名冲突（仅在线模式）：先来后到（ADR-8）。
+     */
+    @Subscribe
+    public void onPreLogin(PreLoginEvent event) {
+        if (!plugin.enabled() || !plugin.server().getConfiguration().isOnlineMode()) {
+            return;
+        }
+        VelocityAuthConfig cfg = plugin.config();
+        if (!cfg.auth().premium().enabled()
+                || cfg.auth().premium().nameConflict() != VelocityAuthConfig.Premium.NameConflict.FIRST_COME) {
+            return;
+        }
+        String nameLower = event.getUsername().toLowerCase(Locale.ROOT);
+        if (plugin.authService().cache().existsByNameLower(nameLower)) {
+            event.setResult(PreLoginEvent.PreLoginComponentResult.denied(
+                    plugin.lang().msg("auth.name-occupied", "name", event.getUsername())));
+        }
+    }
+
+    @Subscribe
+    public void onGameProfileRequest(GameProfileRequestEvent event) {
+        if (!plugin.enabled()) {
+            return;
+        }
+        VelocityAuthConfig cfg = plugin.config();
+        String connectionName = event.getUsername();
+        String connectionNameLower = connectionName.toLowerCase(Locale.ROOT);
+        String ip = Addresses.ipOf(event.getConnection().getRemoteAddress());
+        GameProfile original = event.getGameProfile();
+
+        // 1) 正版玩家：保留真实 profile（ADR-8 / DESIGN 4.6）
+        if (event.isOnlineMode() && cfg.auth().premium().enabled()) {
+            AuthSession session = new AuthSession(connectionName, ip);
+            Account account = plugin.authService().cache().byNameLower(connectionNameLower).orElse(null);
+            session.authenticatePremium(account);
+            if (account != null && cfg.auth().premium().keepRealUuid()) {
+                plugin.authService().cache().indexIdentity(
+                        io.github.railgun19457.velocityauth.storage.model.IdentityKind.JAVA,
+                        connectionNameLower, account.id());
+            }
+            registry.stage(original.getId(), session);
+            return;
+        }
+
+        // 2) 命中重连绑定 → 重写 profile 为账号规范身份
+        Optional<Account> pending = plugin.authService().consumePendingBinding(connectionNameLower, ip);
+        if (pending.isPresent()) {
+            Account account = pending.get();
+            event.setGameProfile(ProfileFactory.profileFor(account, original.getProperties()));
+            AuthSession session = new AuthSession(connectionName, ip);
+            session.authenticate(account);
+            registry.stage(account.uuid(), session);
+            return;
+        }
+
+        // 3) 会话保持命中 → 直接认证
+        Optional<Account> restored = plugin.authService().resolveSessionLogin(connectionNameLower, ip);
+        if (restored.isPresent()) {
+            Account account = restored.get();
+            event.setGameProfile(ProfileFactory.profileFor(account, original.getProperties()));
+            AuthSession session = new AuthSession(connectionName, ip);
+            session.authenticate(account);
+            registry.stage(account.uuid(), session);
+            return;
+        }
+
+        // 4) 未认证：不改 profile，标记为未认证
+        registry.stage(original.getId(), new AuthSession(connectionName, ip));
+    }
+}

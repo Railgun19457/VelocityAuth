@@ -22,3 +22,7 @@ out/
 .classpath
 .project
 .settings/
+
+# ============ 测试工具 ============
+tools/e2e/node_modules/
+tools/e2e/*.log

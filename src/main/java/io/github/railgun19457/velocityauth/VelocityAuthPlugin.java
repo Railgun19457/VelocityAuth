@@ -8,15 +8,29 @@ import com.velocitypowered.api.plugin.Dependency;
 import com.velocitypowered.api.plugin.Plugin;
 import com.velocitypowered.api.plugin.annotation.DataDirectory;
 import com.velocitypowered.api.proxy.ProxyServer;
+import io.github.railgun19457.velocityauth.auth.AccountCache;
+import io.github.railgun19457.velocityauth.auth.AuthService;
+import io.github.railgun19457.velocityauth.auth.AuthSessionRegistry;
+import io.github.railgun19457.velocityauth.auth.PasswordHasher;
+import io.github.railgun19457.velocityauth.auth.PendingBindingStore;
+import io.github.railgun19457.velocityauth.auth.RateLimiter;
+import io.github.railgun19457.velocityauth.auth.ReconnectService;
+import io.github.railgun19457.velocityauth.command.CommandRegistrar;
 import io.github.railgun19457.velocityauth.config.ConfigService;
 import io.github.railgun19457.velocityauth.config.VelocityAuthConfig;
 import io.github.railgun19457.velocityauth.lang.LangService;
+import io.github.railgun19457.velocityauth.listener.CommandGuardListener;
+import io.github.railgun19457.velocityauth.listener.LoginListener;
+import io.github.railgun19457.velocityauth.listener.PlayerLifecycleListener;
+import io.github.railgun19457.velocityauth.listener.RoutingListener;
 import io.github.railgun19457.velocityauth.storage.StorageService;
+import io.github.railgun19457.velocityauth.util.AsyncExecutor;
 import io.github.railgun19457.velocityauth.util.PluginLogger;
 import org.slf4j.Logger;
 
 import java.io.IOException;
 import java.nio.file.Path;
+import java.time.Duration;
 
 /**
  * VelocityAuth 主类：负责生命周期与组件装配。
@@ -41,6 +55,11 @@ public final class VelocityAuthPlugin {
     private ConfigService configService;
     private LangService langService;
     private StorageService storage;
+    private AsyncExecutor async;
+    private AuthSessionRegistry sessionRegistry;
+    private AuthService authService;
+    private ReconnectService reconnectService;
+
     private volatile boolean enabled;
 
     @Inject
@@ -63,10 +82,30 @@ public final class VelocityAuthPlugin {
             this.langService = LangService.load(config.language(), getClass(), dataDirectory, logger);
 
             this.storage = StorageService.open(config.database(), dataDirectory, logger);
+            this.async = new AsyncExecutor();
+
+            AccountCache cache = new AccountCache(storage.accounts(), storage.identities(), log);
+            cache.load();
+
+            PasswordHasher hasher = new PasswordHasher(config.auth().bcryptCost());
+            PendingBindingStore pendingBindings = new PendingBindingStore();
+            RateLimiter rateLimiter = new RateLimiter();
+            this.authService = new AuthService(this::config, storage, cache, hasher, pendingBindings,
+                    rateLimiter, async, log);
+            this.reconnectService = new ReconnectService(server, this::config, log);
+            this.sessionRegistry = new AuthSessionRegistry();
+
+            registerListeners();
+            new CommandRegistrar(this, sessionRegistry).registerPlayerCommands();
+
+            server.getScheduler()
+                    .buildTask(this, () -> authService.purgeExpired())
+                    .repeat(Duration.ofSeconds(60))
+                    .schedule();
 
             this.enabled = true;
-            log.info("VelocityAuth {} 已加载（语言 {}，数据库 {}）",
-                    BuildConstants.VERSION, langService.code(), storage.describe());
+            log.info("VelocityAuth {} 已加载（语言 {}，数据库 {}，账号 {}）",
+                    BuildConstants.VERSION, langService.code(), storage.describe(), cache.size());
             log.info("服务器映射：登录服={} 主服={} 记忆上次子服={}",
                     config.servers().login(), config.servers().defaultServer(), config.servers().rememberLast());
         } catch (IOException e) {
@@ -78,9 +117,21 @@ public final class VelocityAuthPlugin {
         }
     }
 
+    private void registerListeners() {
+        LoginListener loginListener = new LoginListener(this, sessionRegistry);
+        RoutingListener routingListener = new RoutingListener(this, sessionRegistry);
+        server.getEventManager().register(this, loginListener);
+        server.getEventManager().register(this, routingListener);
+        server.getEventManager().register(this, new CommandGuardListener(this, sessionRegistry));
+        server.getEventManager().register(this, new PlayerLifecycleListener(this, sessionRegistry, routingListener));
+    }
+
     @Subscribe
     public void onProxyShutdown(ProxyShutdownEvent event) {
         this.enabled = false;
+        if (async != null) {
+            async.close();
+        }
         if (storage != null) {
             storage.close();
         }
@@ -123,5 +174,21 @@ public final class VelocityAuthPlugin {
 
     public LangService lang() {
         return langService;
+    }
+
+    public AsyncExecutor async() {
+        return async;
+    }
+
+    public AuthService authService() {
+        return authService;
+    }
+
+    public AuthSessionRegistry sessionRegistry() {
+        return sessionRegistry;
+    }
+
+    public ReconnectService reconnectService() {
+        return reconnectService;
     }
 }

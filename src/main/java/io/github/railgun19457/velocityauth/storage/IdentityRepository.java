@@ -35,8 +35,22 @@ public final class IdentityRepository {
         });
     }
 
-    public List<Identity> findByAccountId(long accountId) {
+    public List<Identity> findAll() {
         return database.withConnection(connection -> {
+            try (PreparedStatement ps = connection.prepareStatement(
+                    "SELECT id, account_id, kind, identifier, first_seen, last_seen FROM identities")) {
+                try (ResultSet rs = ps.executeQuery()) {
+                    List<Identity> out = new ArrayList<>();
+                    while (rs.next()) {
+                        out.add(map(rs));
+                    }
+                    return out;
+                }
+            }
+        });
+    }
+
+    public List<Identity> findByAccountId(long accountId) {        return database.withConnection(connection -> {
             try (PreparedStatement ps = connection.prepareStatement(
                     "SELECT id, account_id, kind, identifier, first_seen, last_seen"
                             + " FROM identities WHERE account_id = ? ORDER BY last_seen DESC")) {
