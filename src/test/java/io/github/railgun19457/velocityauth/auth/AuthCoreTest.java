@@ -2,6 +2,7 @@ package io.github.railgun19457.velocityauth.auth;
 
 import com.velocitypowered.api.util.GameProfile;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.Timeout;
 
 import java.time.Duration;
 import java.util.Optional;
@@ -12,6 +13,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+@Timeout(30)
 class AuthCoreTest {
 
     @Test

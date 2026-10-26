@@ -24,6 +24,7 @@ public final class CommandRegistrar {
         register("register", new RegisterCommand(plugin, registry), "reg");
         register("logout", new LogoutCommand(plugin, registry));
         register("changepassword", new ChangePasswordCommand(plugin, registry), "changepw", "cp");
+        register("verify", new VerifyCommand(plugin, registry));
     }
 
     private void register(String name, SimpleCommand command, String... aliases) {

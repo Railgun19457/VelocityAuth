@@ -37,6 +37,9 @@ command:
   logout:
     success: "<yellow>Logged out. Please reconnect.</yellow>"
     not-authenticated: "<red>You are not logged in.</red>"
+  verify:
+    usage: "<red>Usage: /verify <code> (or /verify cancel)</red>"
+    success: "<green>Verified successfully.</green>"
   changepassword:
     usage: "<red>Usage: /changepassword <old password> <new password></red>"
     success: "<green>Password changed successfully.</green>"
@@ -70,17 +73,22 @@ command:
     success: "<green>Password reset. Please log in again.</green>"
 
 verification:
-  email-sent: "<yellow>A verification code was sent to {email}, enter it within {minutes} minutes.</yellow>"
+  email-subject: "[{server}] Verification code"
+  email-body: "Your verification code is: {code}\n\nIt is valid for {minutes} minutes. Do not share it with anyone.\nIf you did not request this, please ignore this email."
+  email-sent: "<yellow>A verification code was sent to {email}, enter it within {minutes} minutes: /verify <code></yellow>"
   email-sending: "<yellow>Sending the verification code, please wait…</yellow>"
   email-failed: "<red>Failed to send the verification code, please contact an administrator.</red>"
   email-unavailable: "<red>Email service is currently unavailable.</red>"
   qq-instruction: "<yellow>Please send the following code in QQ group {group} (click to copy):</yellow>"
   qq-unavailable: "<red>QQ verification service is currently unavailable.</red>"
-  code-prompt: "<yellow>Enter the verification code: /verify <code></yellow>"
+  code-line: "<gold><bold>    {code}</bold></gold>"
+  code-prompt: "<yellow>Wait for the verification result after sending, no in-game input needed.</yellow>"
+  cancel-usage: "<red>Usage: /verify <code> or /verify cancel</red>"
+  cancelled: "<yellow>Verification cancelled.</yellow>"
+  cancelled-by-player: "<yellow>You cancelled this verification.</yellow>"
   wrong-code: "<red>Wrong code, {remaining} attempts left.</red>"
   expired: "<red>Verification expired, please start again.</red>"
   too-many-attempts: "<red>Too many attempts, verification voided.</red>"
-  cancelled: "<yellow>Verification cancelled.</yellow>"
   success: "<green>Verified successfully.</green>"
   rate-limited: "<red>Too many requests, please try again later.</red>"
   no-session: "<red>There is no verification in progress.</red>"

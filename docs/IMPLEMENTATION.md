@@ -423,3 +423,22 @@ player.sendMessage(msg);
 
 - **决定**：插件监听，bot 主动连接。
 - **理由**：与 OneBot 反向 WS 习惯一致；bot 断线自动重连，运维简单。
+
+### ADR-11 注册门槛开启时 `/register` 的邮箱参数位置
+
+- **背景**：`DESIGN.md` 8.1 规定 `registration.gate: none | email | qq`，但 9.1 的
+  `/register <账号> <密码> [确认密码]` 没有留出"收码邮箱"的位置；而 `gate=email` 必须先知道邮箱才能发码。
+- **选项**：A) 额外参数 `gate=email` 时把邮箱放在第 3 位；B) 先 `/bind email` 再 `/register`（但 `/bind` 要求已认证，鸡生蛋问题）；C) 单独加 `/register-email` 命令。
+- **决定**：**A**。
+  - `gate=none` / `gate=qq`：`/register <账号> <密码> [确认密码]`
+  - `gate=email`：`/register <账号> <密码> <邮箱> [确认密码]`
+- **理由**：保持单条命令、参数自然、无需引入新的认证前状态；`gate=qq` 不需要邮箱，故不变。
+- **代价**：`gate=email` 时命令签名与文档 9.1 有一处位置差异，已在本文档与 `/register` 用法提示中说明。
+
+### ADR-12 验证完成回调必须切换线程
+
+- **背景**：`VerificationService` 的完成回调（如"验证通过 → 建号 → 断开重连"）若在
+  提交验证码的命令线程上**内联**执行，会在命令自身后续提示（"验证成功"）之前就把玩家断开，导致提示丢失。
+- **决定**：`VerificationService.finish()` 使用 `CompletableFuture.completeAsync(..., executor)`，
+  在插件的虚拟线程执行器上完成，保证命令线程先返回、提示先送达。
+- **代价**：建号等落库操作在异步线程执行（本来就应如此）。

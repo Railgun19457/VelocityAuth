@@ -37,6 +37,13 @@ public final class AuthOutcomes {
         PASSWORD_MISMATCH,
         GATE_REQUIRED,
         RATE_LIMITED,
+        EMAIL_INVALID,
+        DOMAIN_NOT_ALLOWED,
+        EMAIL_LIMIT,
+        QQ_LIMIT,
+        VERIFICATION_CANCELLED,
+        VERIFICATION_EXPIRED,
+        VERIFICATION_FAILED,
         ERROR
     }
 

@@ -2,6 +2,7 @@ package io.github.railgun19457.velocityauth.config;
 
 import io.github.railgun19457.velocityauth.lang.LangService;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.Timeout;
 
 import java.util.Map;
 
@@ -9,6 +10,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+@Timeout(30)
 class ConfigAndLangTest {
 
     @Test

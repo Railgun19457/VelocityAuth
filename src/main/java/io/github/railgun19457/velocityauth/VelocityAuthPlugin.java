@@ -15,6 +15,7 @@ import io.github.railgun19457.velocityauth.auth.PasswordHasher;
 import io.github.railgun19457.velocityauth.auth.PendingBindingStore;
 import io.github.railgun19457.velocityauth.auth.RateLimiter;
 import io.github.railgun19457.velocityauth.auth.ReconnectService;
+import io.github.railgun19457.velocityauth.auth.RegistrationFlow;
 import io.github.railgun19457.velocityauth.command.CommandRegistrar;
 import io.github.railgun19457.velocityauth.config.ConfigService;
 import io.github.railgun19457.velocityauth.config.VelocityAuthConfig;
@@ -23,9 +24,14 @@ import io.github.railgun19457.velocityauth.listener.CommandGuardListener;
 import io.github.railgun19457.velocityauth.listener.LoginListener;
 import io.github.railgun19457.velocityauth.listener.PlayerLifecycleListener;
 import io.github.railgun19457.velocityauth.listener.RoutingListener;
+import io.github.railgun19457.velocityauth.mail.SmtpSender;
 import io.github.railgun19457.velocityauth.storage.StorageService;
 import io.github.railgun19457.velocityauth.util.AsyncExecutor;
 import io.github.railgun19457.velocityauth.util.PluginLogger;
+import io.github.railgun19457.velocityauth.verify.QqVerificationGateway;
+import io.github.railgun19457.velocityauth.verify.StubQqGateway;
+import io.github.railgun19457.velocityauth.verify.VerificationService;
+import net.kyori.adventure.text.serializer.plain.PlainTextComponentSerializer;
 import org.slf4j.Logger;
 
 import java.io.IOException;
@@ -59,6 +65,8 @@ public final class VelocityAuthPlugin {
     private AuthSessionRegistry sessionRegistry;
     private AuthService authService;
     private ReconnectService reconnectService;
+    private VerificationService verificationService;
+    private RegistrationFlow registrationFlow;
 
     private volatile boolean enabled;
 
@@ -95,11 +103,23 @@ public final class VelocityAuthPlugin {
             this.reconnectService = new ReconnectService(server, this::config, log);
             this.sessionRegistry = new AuthSessionRegistry();
 
+            SmtpSender smtpSender = new SmtpSender(this::config, async, log);
+            QqVerificationGateway qqGateway = new StubQqGateway(
+                    () -> config.qqbot().enabled() && !config.qqbot().groupId().isBlank(), log);
+            this.verificationService = new VerificationService(this::config, this::lang, this::serverName,
+                    smtpSender, qqGateway, rateLimiter,
+                    (task, delay) -> server.getScheduler().buildTask(this, task).delay(delay).schedule(),
+                    async, log);
+            this.registrationFlow = new RegistrationFlow(this::config, authService, verificationService, async, log);
+
             registerListeners();
             new CommandRegistrar(this, sessionRegistry).registerPlayerCommands();
 
             server.getScheduler()
-                    .buildTask(this, () -> authService.purgeExpired())
+                    .buildTask(this, () -> {
+                        authService.purgeExpired();
+                        verificationService.purgeExpired();
+                    })
                     .repeat(Duration.ofSeconds(60))
                     .schedule();
 
@@ -190,5 +210,24 @@ public final class VelocityAuthPlugin {
 
     public ReconnectService reconnectService() {
         return reconnectService;
+    }
+
+    public VerificationService verifications() {
+        return verificationService;
+    }
+
+    public RegistrationFlow registrationFlow() {
+        return registrationFlow;
+    }
+
+    /** 服务器名（用于邮件主题），取代理 MOTD 的纯文本。 */
+    public String serverName() {
+        try {
+            String plain = PlainTextComponentSerializer.plainText()
+                    .serialize(server.getConfiguration().getMotd()).trim();
+            return plain.isEmpty() ? BuildConstants.NAME : plain;
+        } catch (RuntimeException e) {
+            return BuildConstants.NAME;
+        }
     }
 }

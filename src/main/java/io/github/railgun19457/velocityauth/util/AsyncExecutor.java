@@ -1,6 +1,7 @@
 package io.github.railgun19457.velocityauth.util;
 
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.Executor;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.function.Supplier;
@@ -10,10 +11,15 @@ import java.util.function.Supplier;
  * <p>
  * 使用虚拟线程，任务量不大时开销极低。
  */
-public final class AsyncExecutor implements AutoCloseable {
+public final class AsyncExecutor implements Executor, AutoCloseable {
 
     private final ExecutorService executor = Executors.newVirtualThreadPerTaskExecutor();
     private volatile boolean closed;
+
+    @Override
+    public void execute(Runnable command) {
+        run(command);
+    }
 
     public void run(Runnable task) {
         if (closed) {

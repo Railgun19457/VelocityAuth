@@ -4,10 +4,14 @@ import com.velocitypowered.api.proxy.Player;
 import io.github.railgun19457.velocityauth.VelocityAuthPlugin;
 import io.github.railgun19457.velocityauth.auth.AuthOutcomes;
 import io.github.railgun19457.velocityauth.auth.AuthSessionRegistry;
+import io.github.railgun19457.velocityauth.auth.RegistrationFlow;
 import io.github.railgun19457.velocityauth.config.VelocityAuthConfig;
+import io.github.railgun19457.velocityauth.verify.VerificationChannel;
 
 /**
  * {@code /register <账号> <密码> [确认密码]}
+ * <p>
+ * 当 {@code registration.gate = email} 时为 {@code /register <账号> <密码> <邮箱> [确认密码]}（见 ADR-11）。
  */
 public final class RegisterCommand extends PlayerCommandSupport {
 
@@ -21,22 +25,32 @@ public final class RegisterCommand extends PlayerCommandSupport {
         if (player == null || !requireUnauthenticated(player)) {
             return;
         }
+        VelocityAuthConfig cfg = plugin.config();
+        VelocityAuthConfig.Registration.Gate gate = cfg.registration().gate();
+        boolean emailGate = gate == VelocityAuthConfig.Registration.Gate.EMAIL;
+        boolean qqGate = gate == VelocityAuthConfig.Registration.Gate.QQ;
+
         String[] args = invocation.arguments();
-        if (args.length < 2) {
+        int required = emailGate ? 3 : 2;
+        if (args.length < required) {
             player.sendMessage(plugin.lang().msg("command.register.usage"));
             return;
         }
         String name = args[0];
         String password = args[1];
-        String confirm = args.length >= 3 ? args[2] : null;
+        String email = emailGate ? args[2] : null;
+        String confirm = emailGate
+                ? (args.length >= 4 ? args[3] : null)
+                : (args.length >= 3 ? args[2] : null);
 
-        VelocityAuthConfig.AccountName nameRule = plugin.config().auth().accountName();
+        // 快速前置校验（不碰 DB）
+        VelocityAuthConfig.AccountName nameRule = cfg.auth().accountName();
         if (!plugin.authService().validName(name)) {
             player.sendMessage(plugin.lang().msg("command.register.name-invalid",
                     "min", nameRule.minLength(), "max", nameRule.maxLength()));
             return;
         }
-        VelocityAuthConfig.Password pwRule = plugin.config().auth().password();
+        VelocityAuthConfig.Password pwRule = cfg.auth().password();
         AuthOutcomes.RegisterStatus pwIssue = plugin.authService().passwordLengthIssue(password);
         if (pwIssue == AuthOutcomes.RegisterStatus.PASSWORD_TOO_SHORT) {
             player.sendMessage(plugin.lang().msg("command.register.password-too-short", "min", pwRule.minLength()));
@@ -53,8 +67,23 @@ public final class RegisterCommand extends PlayerCommandSupport {
 
         String connectionNameLower = lower(player.getUsername());
         String ip = ipOf(player);
-        plugin.authService().register(name, password, confirm, connectionNameLower, ip)
-                .thenAccept(result -> handle(player, connectionNameLower, ip, result))
+
+        if (!emailGate && !qqGate) {
+            plugin.authService().register(name, password, confirm, connectionNameLower, ip)
+                    .thenAccept(result -> handle(player, connectionNameLower, ip, result))
+                    .exceptionally(throwable -> {
+                        plugin.log().error("注册命令异常", throwable);
+                        player.sendMessage(plugin.lang().msg("generic.internal-error"));
+                        return null;
+                    });
+            return;
+        }
+
+        plugin.registrationFlow()
+                .begin(new RegistrationFlow.Request(player.getUniqueId(), name, password, email,
+                        connectionNameLower, ip,
+                        VerificationPrompts.dispatchHandler(plugin, player, email)))
+                .thenAccept(started -> handleGated(player, connectionNameLower, ip, started))
                 .exceptionally(throwable -> {
                     plugin.log().error("注册命令异常", throwable);
                     player.sendMessage(plugin.lang().msg("generic.internal-error"));
@@ -62,27 +91,60 @@ public final class RegisterCommand extends PlayerCommandSupport {
                 });
     }
 
-    private void handle(Player player, String connectionNameLower, String ip, AuthOutcomes.Register result) {
-        switch (result.status()) {
-            case SUCCESS -> {
+    private void handleGated(Player player, String connectionNameLower, String ip,
+                             RegistrationFlow.Started started) {
+        if (!started.accepted()) {
+            if (!started.notified()) {
+                player.sendMessage(messageFor(started.error()));
+            }
+            return;
+        }
+        if (started.channel() == VerificationChannel.QQ) {
+            VerificationPrompts.sendQqInstruction(plugin, player, started.session().code());
+        }
+        started.completion().thenAccept(result -> {
+            if (result.status() == AuthOutcomes.RegisterStatus.SUCCESS) {
                 plugin.authService().createPendingBinding(connectionNameLower, ip, result.account().id());
                 player.sendMessage(plugin.lang().msg("command.register.success"));
                 plugin.reconnectService().reconnect(player, plugin.lang().msg("auth.login-disconnect"));
+            } else {
+                player.sendMessage(messageFor(result.status()));
             }
-            case NAME_TAKEN -> player.sendMessage(plugin.lang().msg("command.register.name-taken"));
-            case NAME_INVALID -> player.sendMessage(plugin.lang().msg("command.register.name-invalid",
-                    "min", plugin.config().auth().accountName().minLength(),
-                    "max", plugin.config().auth().accountName().maxLength()));
-            case PASSWORD_TOO_SHORT -> player.sendMessage(plugin.lang().msg("command.register.password-too-short",
-                    "min", plugin.config().auth().password().minLength()));
-            case PASSWORD_TOO_LONG -> player.sendMessage(plugin.lang().msg("command.register.password-too-long",
-                    "max", plugin.config().auth().password().maxLength()));
-            case PASSWORD_MISMATCH -> player.sendMessage(plugin.lang().msg("command.register.password-mismatch"));
-            case GATE_REQUIRED -> player.sendMessage(plugin.lang().msg(
-                    "email".equals(result.gate()) ? "command.register.gate-email" : "command.register.gate-qq"));
-            case RATE_LIMITED -> player.sendMessage(plugin.lang().msg("command.register.rate-limited"));
-            case ERROR -> player.sendMessage(plugin.lang().msg("generic.internal-error"));
+        });
+    }
+
+    private void handle(Player player, String connectionNameLower, String ip, AuthOutcomes.Register result) {
+        if (result.status() == AuthOutcomes.RegisterStatus.SUCCESS) {
+            plugin.authService().createPendingBinding(connectionNameLower, ip, result.account().id());
+            player.sendMessage(plugin.lang().msg("command.register.success"));
+            plugin.reconnectService().reconnect(player, plugin.lang().msg("auth.login-disconnect"));
+            return;
         }
+        player.sendMessage(messageFor(result.status()));
+    }
+
+    private net.kyori.adventure.text.Component messageFor(AuthOutcomes.RegisterStatus status) {
+        VelocityAuthConfig cfg = plugin.config();
+        return switch (status) {
+            case NAME_TAKEN -> plugin.lang().msg("command.register.name-taken");
+            case NAME_INVALID -> plugin.lang().msg("command.register.name-invalid",
+                    "min", cfg.auth().accountName().minLength(), "max", cfg.auth().accountName().maxLength());
+            case PASSWORD_TOO_SHORT -> plugin.lang().msg("command.register.password-too-short",
+                    "min", cfg.auth().password().minLength());
+            case PASSWORD_TOO_LONG -> plugin.lang().msg("command.register.password-too-long",
+                    "max", cfg.auth().password().maxLength());
+            case PASSWORD_MISMATCH -> plugin.lang().msg("command.register.password-mismatch");
+            case EMAIL_INVALID -> plugin.lang().msg("command.bind.email-invalid");
+            case DOMAIN_NOT_ALLOWED -> plugin.lang().msg("command.bind.domain-not-allowed");
+            case EMAIL_LIMIT -> plugin.lang().msg("command.bind.email-limit");
+            case QQ_LIMIT -> plugin.lang().msg("command.bind.qq-limit");
+            case RATE_LIMITED -> plugin.lang().msg("command.register.rate-limited");
+            case VERIFICATION_CANCELLED -> plugin.lang().msg("verification.cancelled");
+            case VERIFICATION_EXPIRED -> plugin.lang().msg("verification.expired");
+            case VERIFICATION_FAILED -> plugin.lang().msg("generic.internal-error");
+            case GATE_REQUIRED -> plugin.lang().msg("generic.feature-disabled");
+            case SUCCESS, ERROR -> plugin.lang().msg("generic.internal-error");
+        };
     }
 
     @Override

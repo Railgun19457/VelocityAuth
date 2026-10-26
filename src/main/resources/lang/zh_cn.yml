@@ -37,6 +37,9 @@ command:
   logout:
     success: "<yellow>已退出登录，请重新连接。</yellow>"
     not-authenticated: "<red>你尚未登录。</red>"
+  verify:
+    usage: "<red>用法：/verify <验证码>（或 /verify cancel 取消）</red>"
+    success: "<green>验证成功。</green>"
   changepassword:
     usage: "<red>用法：/changepassword <旧密码> <新密码></red>"
     success: "<green>密码修改成功。</green>"
@@ -70,17 +73,22 @@ command:
     success: "<green>密码已重置，请重新登录。</green>"
 
 verification:
-  email-sent: "<yellow>验证码已发送至 {email}，请在 {minutes} 分钟内输入。</yellow>"
+  email-subject: "【{server}】验证码"
+  email-body: "你的验证码是：{code}\n\n{minutes} 分钟内有效，请勿泄露给他人。\n如果这不是你本人的操作，请忽略本邮件。"
+  email-sent: "<yellow>验证码已发送至 {email}，请在 {minutes} 分钟内输入：/verify <验证码></yellow>"
   email-sending: "<yellow>正在发送验证码，请稍候…</yellow>"
   email-failed: "<red>验证码发送失败，请联系管理员。</red>"
   email-unavailable: "<red>邮箱服务当前不可用。</red>"
   qq-instruction: "<yellow>请在 QQ 群 {group} 发送以下验证码（点击可复制）：</yellow>"
   qq-unavailable: "<red>QQ 验证服务当前不可用。</red>"
-  code-prompt: "<yellow>请输入验证码：/verify <验证码></yellow>"
+  code-line: "<gold><bold>    {code}</bold></gold>"
+  code-prompt: "<yellow>发送后请等待验证结果，无需在游戏内输入。</yellow>"
+  cancel-usage: "<red>用法：/verify <验证码> 或 /verify cancel</red>"
+  cancelled: "<yellow>验证已取消。</yellow>"
+  cancelled-by-player: "<yellow>你已取消本次验证。</yellow>"
   wrong-code: "<red>验证码错误，还可尝试 {remaining} 次。</red>"
   expired: "<red>验证已过期，请重新发起。</red>"
   too-many-attempts: "<red>尝试次数过多，验证已作废。</red>"
-  cancelled: "<yellow>验证已取消。</yellow>"
   success: "<green>验证成功。</green>"
   rate-limited: "<red>操作过于频繁，请稍后再试。</red>"
   no-session: "<red>当前没有进行中的验证，请先发起。</red>"
