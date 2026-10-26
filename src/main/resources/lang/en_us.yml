@@ -189,3 +189,7 @@ migration:
   skipped: "<yellow>Skipped {count} existing account(s).</yellow>"
   needs-reset: "<yellow>{count} account(s) have an incompatible password format and were marked for reset.</yellow>"
   done: "<green>Migration finished.</green>"
+  unmapped: "<yellow>{count} record(s) have no nickname and cannot be mapped.</yellow>"
+  dry-run: "<yellow>(dry run, nothing written)</yellow>"
+  emails: "<green>Migrated {count} email binding(s).</green>"
+  usage: "<red>Usage: /vauth migrate librelogin [--dry-run] [--file <path>]</red>"

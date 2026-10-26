@@ -189,3 +189,7 @@ migration:
   skipped: "<yellow>跳过 {count} 个已存在账号。</yellow>"
   needs-reset: "<yellow>{count} 个账号密码格式不兼容，已标记为需重置。</yellow>"
   done: "<green>迁移完成。</green>"
+  unmapped: "<yellow>{count} 条记录缺少昵称，无法自动映射。</yellow>"
+  dry-run: "<yellow>（试运行，未写入任何数据）</yellow>"
+  emails: "<green>已迁移 {count} 个邮箱绑定。</green>"
+  usage: "<red>用法：/vauth migrate librelogin [--dry-run] [--file <路径>]</red>"

@@ -61,6 +61,7 @@ public final class AdminCommand implements SimpleCommand {
             case "forcelogin" -> forcelogin(source, args);
             case "pair" -> pair(source, args);
             case "client" -> client(source, args);
+            case "migrate" -> migrate(source, args);
             default -> usage(source);
         }
     }
@@ -392,11 +393,69 @@ public final class AdminCommand implements SimpleCommand {
         return source instanceof Player player ? player.getUsername() : "console";
     }
 
+    // ------------------------------------------------------------------ migrate
+
+    private void migrate(CommandSource source, String[] args) {
+        if (args.length < 2 || !args[1].equalsIgnoreCase("librelogin")) {
+            source.sendMessage(plugin.lang().msg("migration.usage"));
+            return;
+        }
+        boolean dryRun = false;
+        java.nio.file.Path file = null;
+        for (int i = 2; i < args.length; i++) {
+            if (args[i].equalsIgnoreCase("--dry-run")) {
+                dryRun = true;
+            } else if (args[i].equalsIgnoreCase("--file") && i + 1 < args.length) {
+                file = java.nio.file.Path.of(args[++i]);
+            }
+        }
+        final java.nio.file.Path database = file;
+        final boolean runDry = dryRun;
+
+        source.sendMessage(plugin.lang().msg("migration.header"));
+        plugin.async().run(() -> {
+            try {
+                java.nio.file.Path target = database;
+                if (target == null) {
+                    target = io.github.railgun19457.velocityauth.migrate.LibreLoginMigrator
+                            .findDefaultDatabase(plugin.dataDirectory()).orElse(null);
+                }
+                if (target == null) {
+                    source.sendMessage(plugin.lang().msg("migration.not-found"));
+                    return;
+                }
+                source.sendMessage(plugin.lang().msg("migration.started"));
+                var report = plugin.migrator().migrate(target, runDry);
+                source.sendMessage(plugin.lang().msg("migration.imported", "count", report.imported()));
+                source.sendMessage(plugin.lang().msg("migration.skipped", "count", report.skipped()));
+                if (report.needsReset() > 0) {
+                    source.sendMessage(plugin.lang().msg("migration.needs-reset", "count", report.needsReset()));
+                }
+                if (report.unmapped() > 0) {
+                    source.sendMessage(plugin.lang().msg("migration.unmapped", "count", report.unmapped()));
+                }
+                if (report.emails() > 0) {
+                    source.sendMessage(plugin.lang().msg("migration.emails", "count", report.emails()));
+                }
+                if (report.dryRun()) {
+                    source.sendMessage(plugin.lang().msg("migration.dry-run"));
+                }
+                source.sendMessage(plugin.lang().msg("migration.done"));
+                plugin.log().info("LibreLogin 迁移完成：扫描 {}，导入 {}，跳过 {}，需重置 {}，未映射 {}",
+                        report.scanned(), report.imported(), report.skipped(), report.needsReset(),
+                        report.unmapped());
+            } catch (Exception e) {
+                source.sendMessage(plugin.lang().msg("generic.internal-error"));
+                plugin.log().error("迁移失败：" + e.getMessage(), e);
+            }
+        });
+    }
+
     @Override
     public List<String> suggest(Invocation invocation) {
         String[] args = invocation.arguments();
         if (args.length <= 1) {
-            return List.of("status", "reload", "account", "sessions", "forcelogin", "pair", "client");
+            return List.of("status", "reload", "account", "sessions", "forcelogin", "pair", "client", "migrate");
         }
         return switch (args[0].toLowerCase(Locale.ROOT)) {
             case "account" -> args.length == 3
@@ -405,6 +464,7 @@ public final class AdminCommand implements SimpleCommand {
             case "sessions" -> args.length == 2 ? List.of("list", "kick") : List.of();
             case "pair" -> args.length == 2 ? List.of("new", "list", "revoke") : List.of();
             case "client" -> args.length == 2 ? List.of("list", "revoke") : List.of();
+            case "migrate" -> args.length == 2 ? List.of("librelogin") : List.of("--dry-run", "--file");
             default -> List.of();
         };
     }
