@@ -16,7 +16,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 /**
  * 协议测试向量（docs/protocol/vectors）：规范化、签名输入、密钥派生、密封帧。
  * <p>
- * 这是硬性门槛——bot 侧与插件侧都必须逐字节一致（IMPLEMENTATION.md 第 6 节）。
+ * 这是硬性门槛——bot 侧与插件侧都必须逐字节一致。
  */
 @Timeout(30)
 class ProtocolVectorsTest {

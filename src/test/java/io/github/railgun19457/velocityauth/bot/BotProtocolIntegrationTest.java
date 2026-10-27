@@ -22,7 +22,7 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * 起本地 {@link BotServer}，用测试客户端跑完整 pair + auth + verify 流程（IMPLEMENTATION.md 第 6 节）。
+ * 起本地 {@link BotServer}，用测试客户端跑完整 pair + auth + verify 流程。
  */
 @Timeout(60)
 class BotProtocolIntegrationTest {

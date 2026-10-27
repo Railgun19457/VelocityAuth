@@ -27,7 +27,7 @@ import java.util.function.Supplier;
  * 流程：校验参数 → 预计算 bcrypt 哈希 → 发起验证会话 → 验证通过后落库（建号 + 绑定）。
  * 明文密码不进入内存态：会话里保存的是**已哈希**的密码。
  * <p>
- * 参数约定（见 docs/IMPLEMENTATION.md ADR-11）：
+ * 参数约定：
  * <ul>
  *   <li>{@code gate=qq}：{@code /register <账号> <密码> [确认密码]}</li>
  *   <li>{@code gate=email}：{@code /register <账号> <密码> <邮箱> [确认密码]}</li>

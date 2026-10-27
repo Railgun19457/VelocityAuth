@@ -15,7 +15,7 @@ import java.util.concurrent.ConcurrentHashMap;
  * 账号 / 身份内存索引。
  * <p>
  * {@code GameProfileRequestEvent} 是 @AwaitingEvent，代理会等待其返回，
- * 因此登录热路径只允许查内存（见 IMPLEMENTATION.md 5.3-9）。
+ * 因此登录热路径只允许查内存。
  */
 public final class AccountCache {
 

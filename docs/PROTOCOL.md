@@ -2,8 +2,9 @@
 
 > Velocity 插件 ⇄ QQ bot 的 WebSocket 通道协议
 >
-> 状态：v1 草案（含可执行测试向量）
-> 实现方：插件侧（Java，本项目）/ bot 侧（由使用方自行实现）
+> 状态：v1（含可执行测试向量）
+> 实现方：插件侧（Java，本仓库 `src/main/java/.../bot/`）/ bot 侧（由使用方自行实现，
+> 本仓库附一份 [Node.js 参考实现](protocol/reference/node)）
 
 ---
 
@@ -425,7 +426,31 @@ plugin → bot   verify.matched.ack { code:"MC-8F3K2A", consumed:true }
 
 ---
 
-## 附：与设计文档的关系
+## 附 A：Node.js 参考实现
 
-- 业务背景与整体设计见 [`DESIGN.md`](DESIGN.md)
+[`protocol/reference/node/`](protocol/reference/node) 是一份可直接运行的 bot 侧参考实现，
+只用 Node 内置模块（`node:crypto` + 全局 `WebSocket`，**无需 `npm install`**，Node ≥ 22）：
+
+| 文件 | 内容 |
+|---|---|
+| `protocol.mjs` | `canonical()` / `signature_input()` / `message_plaintext()` / HKDF / AES-GCM 密封帧 |
+| `bot-client.mjs` | `ReferenceBot`：配对 + 会话认证 + `verify.watch` / `verify.matched` 处理 |
+
+自检（对照本目录的测试向量，逐字节比对）：
+
+```bash
+node --input-type=module -e "
+import * as m from './protocol.mjs';
+// 见 reference/node/README.md 的完整自检命令
+"
+```
+
+完整用法见 [`protocol/reference/node/README.md`](protocol/reference/node/README.md)。
+
+---
+
+## 附 B：权威性
+
 - 本文件是 bot 侧实现的**唯一权威来源**；字段以本文件为准
+- [`protocol/vectors/`](protocol/vectors) 是可执行的一致性门槛，双方实现都必须逐字节通过
+- 插件侧实现位于本仓库 `src/main/java/.../bot/`（`bot/protocol/` 为协议层）

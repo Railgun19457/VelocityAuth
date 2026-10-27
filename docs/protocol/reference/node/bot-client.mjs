@@ -19,7 +19,7 @@ import {
   seal,
   unseal,
   parseMessage,
-} from './lib/protocol.mjs'
+} from './protocol.mjs'
 
 const CAPABILITIES = ['verify.v1']
 const CLIENT_ID = process.env.VA_BOT_CLIENT_ID || 'node-bot-1'

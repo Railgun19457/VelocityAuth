@@ -7,7 +7,7 @@ import java.util.concurrent.Executors;
 import java.util.function.Supplier;
 
 /**
- * 异步执行器：所有 DB / SMTP / 网络 IO 都不得阻塞事件循环（见 IMPLEMENTATION.md 5.3-8）。
+ * 异步执行器：所有 DB / SMTP / 网络 IO 都不得阻塞事件循环。
  * <p>
  * 使用虚拟线程，任务量不大时开销极低。
  */

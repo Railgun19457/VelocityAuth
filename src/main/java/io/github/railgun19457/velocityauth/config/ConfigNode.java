@@ -8,7 +8,7 @@ import java.util.Map;
 /**
  * 配置树上的一个节点。所有读取都带默认值，并对类型不匹配抛出带字段路径的 {@link ConfigException}。
  * <p>
- * 相比直接做 Bean 绑定，手动读取的好处是可以给出精确的字段路径与取值范围提示（见 IMPLEMENTATION.md 5.7-23）。
+ * 相比直接做 Bean 绑定，手动读取的好处是可以给出精确的字段路径与取值范围提示。
  */
 public final class ConfigNode {
 

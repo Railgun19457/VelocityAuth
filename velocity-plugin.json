@@ -1,1 +1,0 @@
-{"id":"velocityauth","name":"VelocityAuth","version":"0.1.0-SNAPSHOT","description":"Account + password authentication with optional email/QQ verification and recovery.","authors":["Railgun19457"],"dependencies":[{"id":"floodgate","optional":true}],"main":"io.github.railgun19457.velocityauth.VelocityAuthPlugin"}

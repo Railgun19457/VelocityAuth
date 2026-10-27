@@ -12,8 +12,6 @@ import java.util.function.Supplier;
 
 /**
  * 登录成功后的"重连"：优先使用 Transfer 包（1.20.5+），否则断开并提示重连。
- * <p>
- * 见 DESIGN.md 4.3 与 IMPLEMENTATION.md 5.2。
  */
 public final class ReconnectService {
 
