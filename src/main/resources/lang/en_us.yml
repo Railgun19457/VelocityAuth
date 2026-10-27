@@ -192,4 +192,4 @@ migration:
   unmapped: "<yellow>{count} record(s) have no nickname and cannot be mapped.</yellow>"
   dry-run: "<yellow>(dry run, nothing written)</yellow>"
   emails: "<green>Migrated {count} email binding(s).</green>"
-  usage: "<red>Usage: /vauth migrate librelogin [--dry-run] [--file <path>]</red>"
+  usage: "<red>Usage: /vauth migrate librelogin [--dry-run] [--file <sqlite path>] [--url <jdbc url> --user <user> --password <pass>]</red>"

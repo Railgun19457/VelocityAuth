@@ -8,6 +8,7 @@ import io.github.railgun19457.velocityauth.auth.AuthOutcomes;
 import io.github.railgun19457.velocityauth.auth.AuthSession;
 import io.github.railgun19457.velocityauth.bot.KeyStore;
 import io.github.railgun19457.velocityauth.bot.PairingService;
+import io.github.railgun19457.velocityauth.migrate.LibreLoginMigrator;
 import io.github.railgun19457.velocityauth.storage.model.Account;
 import io.github.railgun19457.velocityauth.storage.model.AccountStatus;
 import io.github.railgun19457.velocityauth.storage.model.AuditEntry;
@@ -402,30 +403,49 @@ public final class AdminCommand implements SimpleCommand {
         }
         boolean dryRun = false;
         java.nio.file.Path file = null;
+        String url = null;
+        String user = null;
+        String password = null;
         for (int i = 2; i < args.length; i++) {
             if (args[i].equalsIgnoreCase("--dry-run")) {
                 dryRun = true;
             } else if (args[i].equalsIgnoreCase("--file") && i + 1 < args.length) {
                 file = java.nio.file.Path.of(args[++i]);
+            } else if (args[i].equalsIgnoreCase("--url") && i + 1 < args.length) {
+                url = args[++i];
+            } else if (args[i].equalsIgnoreCase("--user") && i + 1 < args.length) {
+                user = args[++i];
+            } else if (args[i].equalsIgnoreCase("--password") && i + 1 < args.length) {
+                password = args[++i];
             }
         }
-        final java.nio.file.Path database = file;
         final boolean runDry = dryRun;
+        final String jdbcUrl = url;
+        final String jdbcUser = user;
+        final String jdbcPassword = password;
+        final java.nio.file.Path explicitFile = file;
 
         source.sendMessage(plugin.lang().msg("migration.header"));
         plugin.async().run(() -> {
             try {
-                java.nio.file.Path target = database;
-                if (target == null) {
-                    target = io.github.railgun19457.velocityauth.migrate.LibreLoginMigrator
-                            .findDefaultDatabase(plugin.dataDirectory()).orElse(null);
-                }
-                if (target == null) {
-                    source.sendMessage(plugin.lang().msg("migration.not-found"));
-                    return;
+                LibreLoginMigrator.Source migrationSource;
+                if (jdbcUrl != null && !jdbcUrl.isBlank()) {
+                    // 生产环境常用 MariaDB/MySQL，例如：
+                    // --url jdbc:mysql://127.0.0.1:3306/librelogin --user root --password ***
+                    migrationSource = LibreLoginMigrator.Source.jdbc(jdbcUrl, jdbcUser, jdbcPassword);
+                } else {
+                    java.nio.file.Path target = explicitFile;
+                    if (target == null) {
+                        target = LibreLoginMigrator.findDefaultDatabase(plugin.dataDirectory()).orElse(null);
+                    }
+                    if (target == null) {
+                        source.sendMessage(plugin.lang().msg("migration.not-found"));
+                        return;
+                    }
+                    migrationSource = LibreLoginMigrator.Source.sqliteFile(target);
                 }
                 source.sendMessage(plugin.lang().msg("migration.started"));
-                var report = plugin.migrator().migrate(target, runDry);
+                var report = plugin.migrator().migrate(migrationSource, runDry);
                 source.sendMessage(plugin.lang().msg("migration.imported", "count", report.imported()));
                 source.sendMessage(plugin.lang().msg("migration.skipped", "count", report.skipped()));
                 if (report.needsReset() > 0) {
@@ -464,7 +484,8 @@ public final class AdminCommand implements SimpleCommand {
             case "sessions" -> args.length == 2 ? List.of("list", "kick") : List.of();
             case "pair" -> args.length == 2 ? List.of("new", "list", "revoke") : List.of();
             case "client" -> args.length == 2 ? List.of("list", "revoke") : List.of();
-            case "migrate" -> args.length == 2 ? List.of("librelogin") : List.of("--dry-run", "--file");
+            case "migrate" -> args.length == 2 ? List.of("librelogin")
+                    : List.of("--dry-run", "--file", "--url", "--user", "--password");
             default -> List.of();
         };
     }

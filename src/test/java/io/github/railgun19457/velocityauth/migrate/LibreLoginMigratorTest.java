@@ -20,6 +20,7 @@ import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
@@ -73,32 +74,51 @@ class LibreLoginMigratorTest {
                     + "last_authentication TIMESTAMP NULL DEFAULT NULL,"
                     + "email VARCHAR(255))");
 
-            // 1) bcrypt 可直接复用
+            // 1) 真实格式的 bcrypt：LibreLogin 把 bcrypt 拆成 algo/salt/hashed_password 三列
+            String[] split = splitLibreLoginHash(bcryptHash);
             insert(statement, UUID.nameUUIDFromBytes("OfflinePlayer:LegacyOne".getBytes()).toString(),
-                    null, bcryptHash, "BCRYPT", "LegacyOne", "2024-01-02 03:04:05", "survival",
+                    null, split[1], split[0], "BCrypt-2A", "LegacyOne", "2024-01-02 03:04:05", "survival",
                     "legacy1@qq.com");
-            // 2) SHA256 无法转换 → 需重置
+            // 2) Argon2ID：本插件不支持 → 需重置
             insert(statement, UUID.nameUUIDFromBytes("OfflinePlayer:LegacyTwo".getBytes()).toString(),
-                    null, "5e884898da28047151d0e56f8dc6292773603d0d6aabbdd62a11ef721d1542d8", "SHA256",
+                    null, "1,3,4096$ZGVhZGJlZWZkZWFkYmVlZg==", "c29tZXNhbHQ=", "Argon-2ID",
                     "LegacyTwo", null, null, null);
-            // 3) 昵称为空串 → 无法映射（真实表 last_nickname 是 NOT NULL，这里覆盖空值分支）
+            // 3) 完全没有密码（LibreLogin 里正版自动注册的账号）→ 需重置
             insert(statement, UUID.nameUUIDFromBytes("OfflinePlayer:NoName".getBytes()).toString(),
-                    null, bcryptHash, "BCRYPT", "", null, null, null);
+                    null, null, null, null, "NoPassword", null, null, null);
             // 4) 与现有账号重名 → 跳过
             insert(statement, UUID.nameUUIDFromBytes("OfflinePlayer:Taken".getBytes()).toString(),
-                    null, bcryptHash, "BCRYPT", "Taken", null, null, null);
+                    null, split[1], split[0], "BCrypt-2A", "Taken", null, null, null);
+            // 5) 昵称为空串 → 无法映射
+            insert(statement, UUID.nameUUIDFromBytes("OfflinePlayer:Blank".getBytes()).toString(),
+                    null, split[1], split[0], "BCrypt-2A", "", null, null, null);
         }
         storage.accounts().insert("Taken", "taken", UUID.randomUUID(), "h",
                 io.github.railgun19457.velocityauth.storage.model.AccountStatus.ACTIVE, null, 1L);
     }
 
-    private void insert(Statement statement, String uuid, String premium, String hash, String algo,
+    /**
+     * 按 LibreLogin 的 {@code CryptoUtil.convertFromBCryptRaw} 拆分完整 bcrypt 串：
+     * {@code $2a$10$<22盐><31哈希>} → hashed_password={@code 10$<31哈希>}，salt={@code <22盐>}。
+     *
+     * @return {salt, hashed_password}
+     */
+    private static String[] splitLibreLoginHash(String fullBcrypt) {
+        String[] parts = fullBcrypt.split("\\$");   // ["", "2a", "10", "<22盐><31哈希>"]
+        String cost = parts[2];
+        String rest = parts[3];
+        String salt = rest.substring(0, 22);
+        String hash = rest.substring(22);
+        return new String[]{salt, cost + "$" + hash};
+    }
+
+    private void insert(Statement statement, String uuid, String premium, String hash, String salt, String algo,
                         String nickname, String lastSeen, String lastServer, String email) throws Exception {
         statement.execute("INSERT INTO librepremium_data(uuid, premium_uuid, hashed_password, salt, algo,"
                 + " last_nickname, joined, last_seen, last_server, email) VALUES ("
-                + quote(uuid) + ", " + quote(premium) + ", " + quote(hash) + ", NULL, " + quote(algo) + ", "
-                + quote(nickname) + ", NULL, " + quote(lastSeen) + ", " + quote(lastServer) + ", "
-                + quote(email) + ")");
+                + quote(uuid) + ", " + quote(premium) + ", " + quote(hash) + ", " + quote(salt) + ", "
+                + quote(algo) + ", " + quote(nickname) + ", NULL, " + quote(lastSeen) + ", "
+                + quote(lastServer) + ", " + quote(email) + ")");
     }
 
     private static String quote(String value) {
@@ -108,8 +128,8 @@ class LibreLoginMigratorTest {
     @Test
     void dryRunDoesNotWriteAnything() throws Exception {
         var report = migrator.migrate(legacyDb, true);
-        assertEquals(4, report.scanned());
-        assertEquals(2, report.imported());
+        assertEquals(5, report.scanned());
+        assertEquals(3, report.imported());
         assertEquals(1, report.skipped());
         assertEquals(1, report.unmapped());
         assertTrue(report.dryRun());
@@ -119,8 +139,8 @@ class LibreLoginMigratorTest {
     @Test
     void migrationMapsAccountsPasswordsAndMetadata() throws Exception {
         var report = migrator.migrate(legacyDb, false);
-        assertEquals(2, report.imported());
-        assertEquals(1, report.needsReset());
+        assertEquals(3, report.imported());
+        assertEquals(2, report.needsReset());
         assertEquals(1, report.skipped());
         assertEquals(1, report.unmapped());
         assertEquals(1, report.emails());
@@ -130,18 +150,22 @@ class LibreLoginMigratorTest {
         assertEquals("LegacyOne", one.name());
         assertEquals(io.github.railgun19457.velocityauth.auth.ProfileFactory.offlineUuid("legacyone"),
                 one.uuid());
+        // 关键：LibreLogin 的三列存储被还原成标准 bcrypt，且**原密码仍然可用**
+        assertEquals(60, one.passwordHash().length());
+        assertTrue(one.passwordHash().startsWith("$2a$"), one.passwordHash());
+        assertEquals(one.passwordHash(), bcryptHash, "还原结果应与原始 bcrypt 串完全一致");
         assertTrue(hasher.verify("LegacyPass1", one.passwordHash()), "bcrypt 哈希应可直接复用");
+        assertFalse(hasher.verify("WrongPass1", one.passwordHash()));
         assertEquals("survival", one.lastServer());
         assertTrue(one.lastLoginAt() != null && one.lastLoginAt() > 0, "last_seen 应被迁移");
         assertEquals("legacy1@qq.com",
                 storage.bindings().find(one.id(), BindingType.EMAIL).orElseThrow().identifier());
 
-        // 不可转换的算法 → 占位哈希（bcrypt 校验必然失败）
+        // Argon2ID 与"无密码"账号 → 占位哈希（bcrypt 校验必然失败）
         var two = storage.accounts().findByNameLower("legacytwo").orElseThrow();
         assertEquals(LibreLoginMigrator.NEEDS_RESET_HASH, two.passwordHash());
-        assertFalse(hasher.verify("anything", two.passwordHash()));
-        assertFalse(hasher.verify("5e884898da28047151d0e56f8dc6292773603d0d6aabbdd62a11ef621d1542d8",
-                two.passwordHash()));
+        var noPassword = storage.accounts().findByNameLower("nopassword").orElseThrow();
+        assertEquals(LibreLoginMigrator.NEEDS_RESET_HASH, noPassword.passwordHash());
 
         // 身份映射已写入，玩家用原连接名即可命中账号
         assertTrue(storage.identities().find(
@@ -159,18 +183,53 @@ class LibreLoginMigratorTest {
         int after = storage.accounts().count();
         var second = migrator.migrate(legacyDb, false);
         assertEquals(0, second.imported());
-        assertEquals(3, second.skipped());
+        assertEquals(4, second.skipped());
         assertEquals(1, second.unmapped());
         assertEquals(after, storage.accounts().count(), "重复迁移不应产生重复账号");
     }
 
     @Test
-    void bcryptDetectionRules() {
-        assertTrue(LibreLoginMigrator.isReusableBcrypt("$2a$10$abc", "BCRYPT"));
-        assertTrue(LibreLoginMigrator.isReusableBcrypt("$2b$10$abc", null));
-        assertTrue(LibreLoginMigrator.isReusableBcrypt("$2y$10$abc", "bcrypt"));
-        assertFalse(LibreLoginMigrator.isReusableBcrypt("deadbeef", "SHA256"));
-        assertFalse(LibreLoginMigrator.isReusableBcrypt(null, "BCRYPT"));
-        assertFalse(LibreLoginMigrator.isReusableBcrypt("", "BCRYPT"));
+    void libreLoginBcryptFormatIsReassembled() {
+        // 真实格式：algo=BCrypt-2A，salt 单独一列，hashed_password = "10$<31字符哈希>"
+        String[] split = splitLibreLoginHash(bcryptHash);
+        String reassembled = LibreLoginMigrator.toReusableBcrypt(split[1], split[0], "BCrypt-2A");
+        assertEquals(bcryptHash, reassembled, "应还原出与原始完全一致的 60 字符 bcrypt 串");
+        assertTrue(hasher.verify("LegacyPass1", reassembled));
+
+        // 版本后缀 2B / 2Y 同样支持
+        assertEquals(bcryptHash.replaceFirst("\\$2a\\$", "\\$2b\\$"),
+                LibreLoginMigrator.toReusableBcrypt(split[1], split[0], "BCrypt-2B"));
+        assertEquals(bcryptHash.replaceFirst("\\$2a\\$", "\\$2y\\$"),
+                LibreLoginMigrator.toReusableBcrypt(split[1], split[0], "bcrypt-2y"));
+
+        // 已是完整 bcrypt 串时原样保留
+        assertEquals(bcryptHash, LibreLoginMigrator.toReusableBcrypt(bcryptHash, null, null));
+        assertEquals(bcryptHash, LibreLoginMigrator.toReusableBcrypt("  " + bcryptHash + " ", "x", "BCrypt-2A"));
+    }
+
+    @Test
+    void unsupportedFormatsAreRejected() {
+        String[] split = splitLibreLoginHash(bcryptHash);
+        // 非 bcrypt 算法
+        assertNull(LibreLoginMigrator.toReusableBcrypt(split[1], split[0], "Argon-2ID"));
+        assertNull(LibreLoginMigrator.toReusableBcrypt("5e884898da28047151d0e56f8dc6292773603d0d6",
+                "somesalt", "SHA256"));
+        // 缺列 / 空值 / 结构异常
+        assertNull(LibreLoginMigrator.toReusableBcrypt(null, split[0], "BCrypt-2A"));
+        assertNull(LibreLoginMigrator.toReusableBcrypt("", split[0], "BCrypt-2A"));
+        assertNull(LibreLoginMigrator.toReusableBcrypt(split[1], null, "BCrypt-2A"));
+        assertNull(LibreLoginMigrator.toReusableBcrypt(split[1], "", "BCrypt-2A"));
+        assertNull(LibreLoginMigrator.toReusableBcrypt(split[1], split[0], null));
+        assertNull(LibreLoginMigrator.toReusableBcrypt("10$onlyonepart", split[0], "BCrypt-2A"));
+        // 长度不对（盐被截断）→ 结构校验拒绝，避免写入无法校验的哈希
+        assertNull(LibreLoginMigrator.toReusableBcrypt(split[1], split[0].substring(0, 10), "BCrypt-2A"));
+    }
+
+    @Test
+    void fullBcryptStructureCheck() {
+        assertTrue(LibreLoginMigrator.isFullBcrypt(bcryptHash));
+        assertFalse(LibreLoginMigrator.isFullBcrypt("$2a$10$tooshort"));
+        assertFalse(LibreLoginMigrator.isFullBcrypt("$2x$10$" + "a".repeat(53)));
+        assertFalse(LibreLoginMigrator.isFullBcrypt(null));
     }
 }

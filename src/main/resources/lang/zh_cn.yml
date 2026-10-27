@@ -192,4 +192,4 @@ migration:
   unmapped: "<yellow>{count} 条记录缺少昵称，无法自动映射。</yellow>"
   dry-run: "<yellow>（试运行，未写入任何数据）</yellow>"
   emails: "<green>已迁移 {count} 个邮箱绑定。</green>"
-  usage: "<red>用法：/vauth migrate librelogin [--dry-run] [--file <路径>]</red>"
+  usage: "<red>用法：/vauth migrate librelogin [--dry-run] [--file <SQLite 路径>] [--url <JDBC URL> --user <用户> --password <密码>]</red>"

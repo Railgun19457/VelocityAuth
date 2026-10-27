@@ -69,7 +69,37 @@ public final class LibreLoginMigrator {
     }
 
     public record Report(int scanned, int imported, int skipped, int needsReset, int unmapped,
-                         int emails, boolean dryRun, Path source) {
+                         int emails, boolean dryRun, String source) {
+    }
+
+    /**
+     * 迁移来源。
+     * <ul>
+     *   <li>{@link #sqliteFile}：LibreLogin 的 SQLite 文件（以只读方式打开，绝不修改）</li>
+     *   <li>{@link #jdbc}：任意 JDBC 数据源，例如 {@code jdbc:mysql://127.0.0.1:3306/librelogin}
+     *       —— LibreLogin 生产环境常用 MariaDB/MySQL</li>
+     * </ul>
+     */
+    public record Source(Path file, String jdbcUrl, String user, String password) {
+
+        public static Source sqliteFile(Path file) {
+            return new Source(file, null, null, null);
+        }
+
+        public static Source jdbc(String url, String user, String password) {
+            return new Source(null, url, user, password);
+        }
+
+        public boolean isJdbc() {
+            return jdbcUrl != null && !jdbcUrl.isBlank();
+        }
+
+        public String describe() {
+            if (isJdbc()) {
+                return jdbcUrl;
+            }
+            return file == null ? "(未指定)" : file.toString();
+        }
     }
 
     /** 在插件数据目录的上一级（即 plugins/）里寻找 LibreLogin 的 SQLite 文件。 */
@@ -88,19 +118,38 @@ public final class LibreLoginMigrator {
     }
 
     public Report migrate(Path database, boolean dryRun) throws IOException, SQLException {
-        if (!Files.isRegularFile(database)) {
-            throw new IOException("找不到 LibreLogin 数据库：" + database.toAbsolutePath());
-        }
-        // 只读打开，避免误改旧库
-        String url = "jdbc:sqlite:file:" + database.toAbsolutePath().toString().replace('\\', '/') + "?mode=ro";
-        try (Connection source = DriverManager.getConnection(url)) {
-            String table = detectTable(source);
-            if (table == null) {
-                throw new SQLException("未在数据库中找到 LibreLogin 表（期望 librepremium_data 或含 hashed_password 的表）");
+        return migrate(Source.sqliteFile(database), dryRun);
+    }
+
+    public Report migrate(Source source, boolean dryRun) throws IOException, SQLException {
+        String url;
+        if (source.isJdbc()) {
+            url = source.jdbcUrl();
+        } else {
+            Path database = source.file();
+            if (database == null || !Files.isRegularFile(database)) {
+                throw new IOException("找不到 LibreLogin 数据库："
+                        + (database == null ? "(未指定)" : database.toAbsolutePath().toString()));
             }
-            log.info("从 {} 的 {} 表迁移", database.getFileName(), table);
-            return migrateTable(source, table, dryRun, database);
+            // 只读打开，避免误改旧库
+            url = "jdbc:sqlite:file:" + database.toAbsolutePath().toString().replace('\\', '/') + "?mode=ro";
         }
+        try (Connection connection = open(url, source.user(), source.password())) {
+            String table = detectTable(connection);
+            if (table == null) {
+                throw new SQLException("未在数据源中找到 LibreLogin 表"
+                        + "（期望 librepremium_data 或含 hashed_password 的表）：" + source.describe());
+            }
+            log.info("从 {} 的 {} 表迁移", source.describe(), table);
+            return migrateTable(connection, table, dryRun, source.describe());
+        }
+    }
+
+    private static Connection open(String url, String user, String password) throws SQLException {
+        if (user == null || user.isEmpty()) {
+            return DriverManager.getConnection(url);
+        }
+        return DriverManager.getConnection(url, user, password == null ? "" : password);
     }
 
     private String detectTable(Connection source) throws SQLException {
@@ -133,7 +182,7 @@ public final class LibreLoginMigrator {
         return columns;
     }
 
-    private Report migrateTable(Connection source, String table, boolean dryRun, Path file)
+    private Report migrateTable(Connection source, String table, boolean dryRun, String sourceName)
             throws SQLException {
         List<String> columns = columnsOf(source, table);
         String uuidColumn = pick(columns, "uuid").orElse(null);
@@ -143,6 +192,7 @@ public final class LibreLoginMigrator {
         String premiumColumn = pick(columns, "premium_uuid").orElse(null);
         String emailColumn = pick(columns, "email").orElse(null);
         String lastServerColumn = pick(columns, "last_server").orElse(null);
+        String saltColumn = pick(columns, "salt").orElse(null);
         String lastSeenColumn = pick(columns, "last_seen").orElse(null);
 
         if (nameColumn == null || hashColumn == null) {
@@ -173,11 +223,12 @@ public final class LibreLoginMigrator {
                     skipped++;
                     continue;
                 }
-                String hash = rs.getString(hashColumn);
+                String rawHash = rs.getString(hashColumn);
                 String algo = algoColumn == null ? null : rs.getString(algoColumn);
-                boolean reusable = isReusableBcrypt(hash, algo);
-                String storedHash = reusable ? hash : NEEDS_RESET_HASH;
-                if (!reusable) {
+                String salt = saltColumn == null ? null : rs.getString(saltColumn);
+                String reusableHash = toReusableBcrypt(rawHash, salt, algo);
+                String storedHash = reusableHash != null ? reusableHash : NEEDS_RESET_HASH;
+                if (reusableHash == null) {
                     needsReset++;
                 }
                 String premium = premiumColumn == null ? null : rs.getString(premiumColumn);
@@ -213,18 +264,55 @@ public final class LibreLoginMigrator {
             storage.audit().log(now, null, AuditEntry.MIGRATE, "console",
                     "librelogin imported=" + imported + " skipped=" + skipped + " needs_reset=" + needsReset);
         }
-        return new Report(scanned, imported, skipped, needsReset, unmapped, emails, dryRun, file);
+        return new Report(scanned, imported, skipped, needsReset, unmapped, emails, dryRun, sourceName);
     }
 
-    /** LibreLogin 的 bcrypt：algo 标注为 BCRYPT（或哈希本身带 $2 前缀）。 */
-    static boolean isReusableBcrypt(String hash, String algo) {
-        if (hash == null || hash.isBlank()) {
-            return false;
+    /**
+     * 把 LibreLogin 的密码列还原成标准 bcrypt 串。
+     * <p>
+     * LibreLogin（{@code CryptoUtil.convertFromBCryptRaw} / {@code rawBcryptFromHashed}）把
+     * bcrypt 结果拆成三列存储：
+     * <pre>
+     *   $2a$10$&lt;22 字符盐&gt;&lt;31 字符哈希&gt;
+     *   ├ algo   = "BCrypt-2A"        （版本后缀，大写）
+     *   ├ salt   = &lt;22 字符盐&gt;         （单独一列）
+     *   └ hashed_password = "10$&lt;31 字符哈希&gt;"   （cost + '$' + 哈希，**不带 $2a$ 前缀**）
+     * </pre>
+     * 校验时再拼回 {@code "$" + 版本 + "$" + hashed_password（把 salt 插回 $ 之后）}。
+     * 另外也兼容 hashed_password 本身就是完整 {@code $2a$...} 串的情况。
+     *
+     * @return 可被本插件 bcrypt 校验的标准 60 字符哈希；无法复用则返回 null
+     */
+    static String toReusableBcrypt(String hashedPassword, String salt, String algo) {
+        if (hashedPassword == null || hashedPassword.isBlank()) {
+            return null;
         }
-        if (algo != null && algo.toUpperCase(Locale.ROOT).contains("BCRYPT") && hash.startsWith("$2")) {
-            return true;
+        String stored = hashedPassword.trim();
+        // 已是完整 bcrypt 串（部分版本/其它插件迁移过来的数据）
+        if (isFullBcrypt(stored)) {
+            return stored;
         }
-        return hash.startsWith("$2a$") || hash.startsWith("$2b$") || hash.startsWith("$2y$");
+        if (algo == null) {
+            return null;
+        }
+        String upper = algo.trim().toUpperCase(Locale.ROOT);
+        if (!upper.startsWith("BCRYPT")) {
+            return null;
+        }
+        String suffix = upper.length() > "BCRYPT-".length()
+                ? upper.substring("BCRYPT-".length()).toLowerCase(Locale.ROOT)
+                : "2a";
+        String[] parts = stored.split("\\$");
+        if (parts.length != 2 || salt == null || salt.isBlank()) {
+            return null;
+        }
+        String full = "$" + suffix + "$" + parts[0] + "$" + salt.trim() + parts[1];
+        return isFullBcrypt(full) ? full : null;
+    }
+
+    /** 结构校验：$2a/$2b/$2y + 两位 cost + 53 字符（22 盐 + 31 哈希），共 60 字符。 */
+    static boolean isFullBcrypt(String value) {
+        return value != null && value.matches("^\\$2[aby]\\$\\d{2}\\$[./A-Za-z0-9]{53}$");
     }
 
     private static java.util.UUID safeUuid(String value) {

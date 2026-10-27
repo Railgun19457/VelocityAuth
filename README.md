@@ -91,10 +91,32 @@ accepts-transfers = true
 | `forcelogin <账号> [--kick]` | **强制登录为指定账号**（顶号），`--kick` 先踢掉该账号现有会话 |
 | `pair new` / `pair list` / `pair revoke <id>` | bot 配对码管理 |
 | `client list` / `client revoke <id>` | 已配对 bot 客户端管理 |
-| `migrate librelogin [--dry-run] [--file <路径>]` | 从 LibreLogin 旧库迁移账号 |
+| `migrate librelogin [--dry-run] [--file <路径>]` | 从 LibreLogin 的 SQLite 库迁移 |
+| `migrate librelogin --url <JDBC URL> [--user <用户>] [--password <密码>]` | 从 LibreLogin 的 MySQL / MariaDB 库迁移 |
 
 > 插件**不提供查看明文密码**：密码以 bcrypt 单向哈希存储，插件本就拿不到明文；
 > 需要顶号时请用 `forcelogin`。
+
+### 从 LibreLogin 迁移
+
+LibreLogin 把 bcrypt 结果拆成三列存储（`algo=BCrypt-2A`、`salt` 单独一列、
+`hashed_password` 只存 `cost$hash`，不含 `$2a$` 前缀），迁移时会按原算法重新拼回标准
+bcrypt 串，因此**玩家可以继续使用原密码登录**；Argon2ID 等本插件不支持的算法会被标记为
+需要重置（占位哈希 `!needs-reset`，可用 `/forgot` 或管理命令改密）。
+
+```bash
+# SQLite（LibreLogin 的默认小规模部署）
+/vauth migrate librelogin --file plugins/librelogin/librepremium_data.db --dry-run
+
+# MySQL / MariaDB（生产常见）
+/vauth migrate librelogin --url jdbc:mysql://127.0.0.1:3306/librelogin --user root --password *** --dry-run
+
+# 确认统计无误后去掉 --dry-run 真正写入
+```
+
+迁移**不会自动执行**；`--dry-run` 只统计不写入；源库以只读方式打开。
+若是 `.sql` 备份文件，先导入到任一 MySQL/MariaDB（`mysql -u root -p librelogin < backup.sql`）
+再迁移，或导入后导出为 SQLite 用 `--file`。
 
 ## 权限
 
