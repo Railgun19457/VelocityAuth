@@ -93,9 +93,12 @@ class LibreLoginMigratorTest {
             // 5) 昵称为空串 → 无法映射
             insert(statement, UUID.nameUUIDFromBytes("OfflinePlayer:Blank".getBytes()).toString(),
                     null, split[1], split[0], "BCrypt-2A", "", null, null, null);
-            // 6) 源库 uuid 非法/缺失 → 回退按小写规范名派生
+            // 6) 源库 uuid 非法/缺失 → 回退按名字原样派生
             insert(statement, "not-a-uuid",
                     null, split[1], split[0], "BCrypt-2A", "DerivedOne", null, null, null);
+            // 7) 历史 uuid 与当前名字不一致（玩家中途改过名）→ 必须沿用源库原值
+            insert(statement, UUID.nameUUIDFromBytes("OfflinePlayer:OldName".getBytes()).toString(),
+                    null, split[1], split[0], "BCrypt-2A", "RenamedOne", null, null, null);
         }
         storage.accounts().insert("Taken", "taken", UUID.randomUUID(), "h",
                 io.github.railgun19457.velocityauth.storage.model.AccountStatus.ACTIVE, null, 1L);
@@ -133,31 +136,38 @@ class LibreLoginMigratorTest {
     void migrationPreservesLegacyUuid() throws Exception {
         var report = migrator.migrate(legacyDb, false);
 
-        // 关键：LibreLogin 的 uuid 由「名字原样」派生，本插件新注册用「小写规范名」，
-        // 含大写字母的名字两者并不相同 —— 迁移必须保留原 UUID，否则按 UUID 存的数据全丢。
+        // 正常情况：账号 UUID 与源库一致（新注册也采用同一算法，两者本就相同）
         UUID legacyUuid = UUID.nameUUIDFromBytes("OfflinePlayer:LegacyOne".getBytes());
-        UUID derivedUuid = io.github.railgun19457.velocityauth.auth.ProfileFactory.offlineUuid("legacyone");
-        assertNotEquals(legacyUuid, derivedUuid, "前置条件：混合大小写的名字两种派生结果必须不同");
+        assertEquals(legacyUuid,
+                io.github.railgun19457.velocityauth.auth.ProfileFactory.offlineUuid("LegacyOne"),
+                "前置条件：本插件的派生算法应与离线模式一致");
 
         var one = storage.accounts().findByNameLower("legacyone").orElseThrow();
         assertEquals(legacyUuid, one.uuid(), "必须保留源库 UUID");
         assertTrue(storage.accounts().findByUuid(legacyUuid).isPresent());
 
-        // 源库没有 uuid 时才回退派生
+        // 改名过的账号：历史 uuid 与当前名字的派生结果不同，只能靠迁移沿用原值
+        UUID renamedLegacy = UUID.nameUUIDFromBytes("OfflinePlayer:OldName".getBytes());
+        UUID renamedDerived = io.github.railgun19457.velocityauth.auth.ProfileFactory.offlineUuid("RenamedOne");
+        assertNotEquals(renamedLegacy, renamedDerived, "前置条件：改名场景两种结果必须不同");
+        var renamed = storage.accounts().findByNameLower("renamedone").orElseThrow();
+        assertEquals(renamedLegacy, renamed.uuid(), "改名账号必须沿用源库 uuid，否则历史数据丢失");
+
+        // 源库没有可用 uuid 时才回退派生（按名字原样）
         var derived = storage.accounts().findByNameLower("derivedone").orElseThrow();
-        assertEquals(io.github.railgun19457.velocityauth.auth.ProfileFactory.offlineUuid("derivedone"),
+        assertEquals(io.github.railgun19457.velocityauth.auth.ProfileFactory.offlineUuid("DerivedOne"),
                 derived.uuid());
 
         // Taken 因重名提前跳过，不参与 UUID 统计；Blank 因昵称为空跳过
-        assertEquals(3, report.uuidPreserved());
+        assertEquals(4, report.uuidPreserved());
         assertEquals(1, report.uuidDerived());
     }
 
     @Test
     void dryRunDoesNotWriteAnything() throws Exception {
         var report = migrator.migrate(legacyDb, true);
-        assertEquals(6, report.scanned());
-        assertEquals(4, report.imported());
+        assertEquals(7, report.scanned());
+        assertEquals(5, report.imported());
         assertEquals(1, report.skipped());
         assertEquals(1, report.unmapped());
         assertTrue(report.dryRun());
@@ -167,7 +177,7 @@ class LibreLoginMigratorTest {
     @Test
     void migrationMapsAccountsPasswordsAndMetadata() throws Exception {
         var report = migrator.migrate(legacyDb, false);
-        assertEquals(4, report.imported());
+        assertEquals(5, report.imported());
         assertEquals(2, report.needsReset());
         assertEquals(1, report.skipped());
         assertEquals(1, report.unmapped());
@@ -210,7 +220,7 @@ class LibreLoginMigratorTest {
         int after = storage.accounts().count();
         var second = migrator.migrate(legacyDb, false);
         assertEquals(0, second.imported());
-        assertEquals(5, second.skipped());
+        assertEquals(6, second.skipped());
         assertEquals(1, second.unmapped());
         assertEquals(after, storage.accounts().count(), "重复迁移不应产生重复账号");
     }

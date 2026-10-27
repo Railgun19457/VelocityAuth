@@ -18,15 +18,21 @@ class AuthCoreTest {
 
     @Test
     void offlineUuidMatchesVelocityAlgorithm() {
-        for (String name : new String[]{"test1", "alice", "a_b_c", "player123"}) {
+        // 含大写字母的名字同样必须与 Velocity 的离线算法逐字节一致
+        for (String name : new String[]{"test1", "alice", "a_b_c", "player123", "Tacker", "MiXian_Ovo",
+                "Xx_ProGamer_xX"}) {
             UUID expected = GameProfile.forOfflinePlayer(name).getId();
             assertEquals(expected, ProfileFactory.offlineUuid(name), "UUID 不一致：" + name);
         }
     }
 
     @Test
-    void accountNameCaseInsensitiveProducesSameUuid() {
-        assertEquals(ProfileFactory.offlineUuid("test1"), ProfileFactory.offlineUuid("TEST1".toLowerCase()));
+    void uuidDerivationIsCaseSensitiveLikeOfflineMode() {
+        // 离线模式按名字原样派生：大小写不同 → UUID 不同。
+        // 这正是"账号 UUID 必须按原样派生"的原因（否则名字含大写字母的玩家会换 UUID、历史数据丢失）。
+        assertNotEquals(ProfileFactory.offlineUuid("Tacker"), ProfileFactory.offlineUuid("tacker"));
+        // 大小写不敏感的账号模型由 name_lower 唯一约束保证，与 UUID 派生方式无关
+        assertEquals(ProfileFactory.offlineUuid("test1"), ProfileFactory.offlineUuid("test1"));
     }
 
     @Test

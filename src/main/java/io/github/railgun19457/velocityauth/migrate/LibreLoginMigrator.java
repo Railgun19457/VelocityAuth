@@ -244,7 +244,7 @@ public final class LibreLoginMigrator {
                     accountUuid = legacyUuid;
                     uuidPreserved++;
                 } else {
-                    accountUuid = ProfileFactory.offlineUuid(nameLower);
+                    accountUuid = ProfileFactory.offlineUuid(name);
                     uuidDerived++;
                 }
                 if (storage.accounts().findByUuid(accountUuid).isPresent()) {

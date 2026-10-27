@@ -126,7 +126,7 @@ public final class AuthService {
 
                 String hash = hasher.hash(password);
                 long now = nowSeconds();
-                long accountId = storage.accounts().insert(name, nameLower, ProfileFactory.offlineUuid(nameLower),
+                long accountId = storage.accounts().insert(name, nameLower, ProfileFactory.offlineUuid(name),
                         hash, AccountStatus.ACTIVE, null, now);
                 storage.identities().upsert(accountId, identity.kind(), identity.identifier(), now);
                 storage.audit().log(now, accountId, AuditEntry.REGISTER, ip, "connection=" + identity.identifier() + " kind=" + identity.kind().dbValue());

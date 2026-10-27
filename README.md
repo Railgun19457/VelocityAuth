@@ -9,6 +9,7 @@ VelocityAuth 是一个运行在 Velocity 上的账号认证插件：**账号名�
 ## 功能特性
 
 - 账号名 + 密码认证，账号名独立于游戏 ID；登录后 **profile 在握手阶段被重写**为账号身份，客户端自己也看到账号名
+- **账号 UUID 用离线模式原生算法**（`offline(账号名)`，大小写敏感），与未装认证插件时期的玩家 UUID 完全一致，历史数据无缝接上
 - 支持**任意游戏 ID 登录同一账号**（`test2` 登录 `test1` 后，全服表现为 `test1`）
 - Java 端与基岩端（Geyser + Floodgate）**共用同一账号**，基岩端身份用 Floodgate UUID 区分
 - 注册门槛可配：`none` / `email` / `qq`（无验证、邮箱收码、群内发码）
@@ -97,15 +98,34 @@ accepts-transfers = true
 > 插件**不提供查看明文密码**：密码以 bcrypt 单向哈希存储，插件本就拿不到明文；
 > 需要顶号时请用 `forcelogin`。
 
+### 账号 UUID 的派生方式
+
+账号 UUID 用**离线模式的原生算法**：`offline(账号名)`（`UUID.nameUUIDFromBytes("OfflinePlayer:" + 名字)`，
+名字**按原样、大小写敏感**）。这与 Velocity 计算离线连接 UUID 的方式完全一致，因此：
+
+```
+玩家连接 Tacker  →  连接 UUID = offline("Tacker")
+/register Tacker →  账号 UUID = offline("Tacker")   ← 一致，profile 重写是空操作
+```
+
+好处是**任何"以前没装认证插件"或"认证插件不改 UUID"的离线服，玩家历史数据都能无缝接上**
+（LuckPerms 权限组、经济、领地、背包……）。若按小写名派生，名字含大写字母的玩家会换到另一个
+UUID，历史数据全部对不上。
+
+账号名仍然**不区分大小写**：唯一性由 `accounts.name_lower` 约束保证，UUID 只在注册时算一次并落库，
+之后一律读库里的值（`Tacker` 与 `tacker` 不能同时注册）。
+
 ### 从 LibreLogin 迁移
 
-迁移会保住三样东西：**UUID、密码、名字**。其中 UUID 是关键——LibreLogin 的 `uuid` 由
-「名字原样（大小写敏感）」派生（`OfflinePlayer:<名字>`），而本插件**新注册**用的是
-「小写规范名」；对含大写字母的名字（实测 962 个账号里有 540 个）两者并不相同。
-若不做迁移直接让玩家重新注册，UUID 会变，LuckPerms 权限组、经济、领地等**所有按 UUID
-存的数据都会对不上**。迁移因此**沿用源库的 `uuid` 原值**，只有源库缺少/非法时才回退派生。
+即使不迁移，老玩家自己 `/register <原名> <新密码>` 也能拿回原 UUID、数据不丢。但迁移仍然值得做：
 
-密码方面，LibreLogin 把 bcrypt 拆成三列存储（`algo=BCrypt-2A`、`salt` 单独一列、
+- **占住名字（最重要）**：不迁移的话老玩家的名字是**空着的**，别人先注册 `<原名>` 就会拿到
+  `offline(<原名>)` —— 也就是那个人的 UUID，从而**继承他的权限组、经济、领地**。迁移等于提前把名字锁回本人
+- **保住密码**：迁移后玩家直接用原密码登录，不必全员重设
+- 保住 `premium_uuid`、`last_server`、邮箱绑定
+- **沿用历史 uuid**：改名过的账号（源库 `uuid` 与当前名字已对不上）只能靠迁移沿用原值，否则历史数据丢失
+
+LibreLogin 把 bcrypt 拆成三列存储（`algo=BCrypt-2A`、`salt` 单独一列、
 `hashed_password` 只存 `cost$hash`、不含 `$2a$` 前缀），迁移时按原算法重新拼回标准 bcrypt 串，
 **玩家可以继续用原密码登录**；Argon2ID 等本插件不支持的算法会被标记为需要重置
 （占位哈希 `!needs-reset`，可用 `/forgot` 或管理命令改密）。
@@ -120,8 +140,9 @@ accepts-transfers = true
 # 确认统计无误后去掉 --dry-run 真正写入
 ```
 
-输出会给出「扫描 / 导入 / 跳过 / 需重置 / 未映射 / 保留原 UUID / 回退派生 UUID」的统计，
-请重点确认**保留原 UUID 的数量**符合预期。
+输出会给出「扫描 / 导入 / 跳过 / 需重置 / 未映射 / 保留原 UUID / 回退派生 UUID」的统计。
+正常情况下「保留原 UUID」应等于导入数（派生算法一致）；若出现「回退派生」，说明源库缺少或存在
+非法 `uuid`，请人工核对那几个账号。
 
 迁移**不会自动执行**；`--dry-run` 只统计不写入；源库以只读方式打开。
 若是 `.sql` 备份文件，先导入到任一 MySQL/MariaDB（`mysql -u root -p librelogin < backup.sql`）

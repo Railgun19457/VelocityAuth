@@ -163,7 +163,7 @@ public final class RegistrationFlow {
             }
 
             long accountId = auth.storage().accounts().insert(name, nameLower,
-                    ProfileFactory.offlineUuid(nameLower), hash, io.github.railgun19457.velocityauth.storage.model
+                    ProfileFactory.offlineUuid(name), hash, io.github.railgun19457.velocityauth.storage.model
                             .AccountStatus.ACTIVE, null, now);
             auth.storage().identities().upsert(accountId, request.identity().kind(), request.identity().identifier(), now);
 
