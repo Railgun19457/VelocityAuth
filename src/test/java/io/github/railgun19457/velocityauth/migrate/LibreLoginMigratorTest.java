@@ -20,6 +20,7 @@ import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -92,6 +93,9 @@ class LibreLoginMigratorTest {
             // 5) 昵称为空串 → 无法映射
             insert(statement, UUID.nameUUIDFromBytes("OfflinePlayer:Blank".getBytes()).toString(),
                     null, split[1], split[0], "BCrypt-2A", "", null, null, null);
+            // 6) 源库 uuid 非法/缺失 → 回退按小写规范名派生
+            insert(statement, "not-a-uuid",
+                    null, split[1], split[0], "BCrypt-2A", "DerivedOne", null, null, null);
         }
         storage.accounts().insert("Taken", "taken", UUID.randomUUID(), "h",
                 io.github.railgun19457.velocityauth.storage.model.AccountStatus.ACTIVE, null, 1L);
@@ -126,10 +130,34 @@ class LibreLoginMigratorTest {
     }
 
     @Test
+    void migrationPreservesLegacyUuid() throws Exception {
+        var report = migrator.migrate(legacyDb, false);
+
+        // 关键：LibreLogin 的 uuid 由「名字原样」派生，本插件新注册用「小写规范名」，
+        // 含大写字母的名字两者并不相同 —— 迁移必须保留原 UUID，否则按 UUID 存的数据全丢。
+        UUID legacyUuid = UUID.nameUUIDFromBytes("OfflinePlayer:LegacyOne".getBytes());
+        UUID derivedUuid = io.github.railgun19457.velocityauth.auth.ProfileFactory.offlineUuid("legacyone");
+        assertNotEquals(legacyUuid, derivedUuid, "前置条件：混合大小写的名字两种派生结果必须不同");
+
+        var one = storage.accounts().findByNameLower("legacyone").orElseThrow();
+        assertEquals(legacyUuid, one.uuid(), "必须保留源库 UUID");
+        assertTrue(storage.accounts().findByUuid(legacyUuid).isPresent());
+
+        // 源库没有 uuid 时才回退派生
+        var derived = storage.accounts().findByNameLower("derivedone").orElseThrow();
+        assertEquals(io.github.railgun19457.velocityauth.auth.ProfileFactory.offlineUuid("derivedone"),
+                derived.uuid());
+
+        // Taken 因重名提前跳过，不参与 UUID 统计；Blank 因昵称为空跳过
+        assertEquals(3, report.uuidPreserved());
+        assertEquals(1, report.uuidDerived());
+    }
+
+    @Test
     void dryRunDoesNotWriteAnything() throws Exception {
         var report = migrator.migrate(legacyDb, true);
-        assertEquals(5, report.scanned());
-        assertEquals(3, report.imported());
+        assertEquals(6, report.scanned());
+        assertEquals(4, report.imported());
         assertEquals(1, report.skipped());
         assertEquals(1, report.unmapped());
         assertTrue(report.dryRun());
@@ -139,17 +167,16 @@ class LibreLoginMigratorTest {
     @Test
     void migrationMapsAccountsPasswordsAndMetadata() throws Exception {
         var report = migrator.migrate(legacyDb, false);
-        assertEquals(3, report.imported());
+        assertEquals(4, report.imported());
         assertEquals(2, report.needsReset());
         assertEquals(1, report.skipped());
         assertEquals(1, report.unmapped());
         assertEquals(1, report.emails());
 
-        // 大小写保留、规范名小写、UUID 由小写名派生
+        // 大小写保留、规范名小写、UUID 沿用源库原值
         var one = storage.accounts().findByNameLower("legacyone").orElseThrow();
         assertEquals("LegacyOne", one.name());
-        assertEquals(io.github.railgun19457.velocityauth.auth.ProfileFactory.offlineUuid("legacyone"),
-                one.uuid());
+        assertEquals(UUID.nameUUIDFromBytes("OfflinePlayer:LegacyOne".getBytes()), one.uuid());
         // 关键：LibreLogin 的三列存储被还原成标准 bcrypt，且**原密码仍然可用**
         assertEquals(60, one.passwordHash().length());
         assertTrue(one.passwordHash().startsWith("$2a$"), one.passwordHash());
@@ -183,7 +210,7 @@ class LibreLoginMigratorTest {
         int after = storage.accounts().count();
         var second = migrator.migrate(legacyDb, false);
         assertEquals(0, second.imported());
-        assertEquals(4, second.skipped());
+        assertEquals(5, second.skipped());
         assertEquals(1, second.unmapped());
         assertEquals(after, storage.accounts().count(), "重复迁移不应产生重复账号");
     }

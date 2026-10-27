@@ -187,6 +187,7 @@ migration:
   started: "<yellow>Migration started…</yellow>"
   imported: "<green>Imported {count} account(s).</green>"
   skipped: "<yellow>Skipped {count} existing account(s).</yellow>"
+  uuid: "<gray>UUID: kept original for {preserved}, derived for {derived} (keeping the original preserves UUID-keyed data)</gray>"
   needs-reset: "<yellow>{count} account(s) have an incompatible password format and were marked for reset.</yellow>"
   done: "<green>Migration finished.</green>"
   unmapped: "<yellow>{count} record(s) have no nickname and cannot be mapped.</yellow>"

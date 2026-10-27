@@ -69,7 +69,8 @@ public final class LibreLoginMigrator {
     }
 
     public record Report(int scanned, int imported, int skipped, int needsReset, int unmapped,
-                         int emails, boolean dryRun, String source) {
+                         int emails, int uuidPreserved, int uuidDerived, boolean dryRun,
+                         String source) {
     }
 
     /**
@@ -201,6 +202,8 @@ public final class LibreLoginMigrator {
 
         int scanned = 0;
         int imported = 0;
+        int uuidPreserved = 0;
+        int uuidDerived = 0;
         int skipped = 0;
         int needsReset = 0;
         int unmapped = 0;
@@ -231,6 +234,23 @@ public final class LibreLoginMigrator {
                 if (reusableHash == null) {
                     needsReset++;
                 }
+                // 关键：保留源库的 UUID。
+                // LibreLogin 的 uuid 由「名字原样（大小写敏感）」派生，而本插件新注册用的是
+                // 「小写规范名」，两者对含大写字母的名字并不相同。迁移必须沿用原 UUID，
+                // 否则 LuckPerms 权限组、经济、领地等所有按 UUID 存的数据都会对不上。
+                java.util.UUID legacyUuid = uuidColumn == null ? null : safeUuid(rs.getString(uuidColumn));
+                java.util.UUID accountUuid;
+                if (legacyUuid != null) {
+                    accountUuid = legacyUuid;
+                    uuidPreserved++;
+                } else {
+                    accountUuid = ProfileFactory.offlineUuid(nameLower);
+                    uuidDerived++;
+                }
+                if (storage.accounts().findByUuid(accountUuid).isPresent()) {
+                    skipped++;
+                    continue;
+                }
                 String premium = premiumColumn == null ? null : rs.getString(premiumColumn);
                 String email = emailColumn == null ? null : EmailRules.normalize(rs.getString(emailColumn));
                 String lastServer = lastServerColumn == null ? null : rs.getString(lastServerColumn);
@@ -244,7 +264,7 @@ public final class LibreLoginMigrator {
                     continue;
                 }
                 long accountId = storage.accounts().insert(name, nameLower,
-                        ProfileFactory.offlineUuid(nameLower), storedHash, AccountStatus.ACTIVE,
+                        accountUuid, storedHash, AccountStatus.ACTIVE,
                         premium == null || premium.isBlank() ? null : safeUuid(premium), now);
                 storage.identities().upsert(accountId, IdentityKind.JAVA, nameLower, now);
                 if (lastServer != null && !lastServer.isBlank()) {
@@ -264,7 +284,8 @@ public final class LibreLoginMigrator {
             storage.audit().log(now, null, AuditEntry.MIGRATE, "console",
                     "librelogin imported=" + imported + " skipped=" + skipped + " needs_reset=" + needsReset);
         }
-        return new Report(scanned, imported, skipped, needsReset, unmapped, emails, dryRun, sourceName);
+        return new Report(scanned, imported, skipped, needsReset, unmapped, emails, uuidPreserved,
+                uuidDerived, dryRun, sourceName);
     }
 
     /**

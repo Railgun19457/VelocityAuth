@@ -448,6 +448,8 @@ public final class AdminCommand implements SimpleCommand {
                 var report = plugin.migrator().migrate(migrationSource, runDry);
                 source.sendMessage(plugin.lang().msg("migration.imported", "count", report.imported()));
                 source.sendMessage(plugin.lang().msg("migration.skipped", "count", report.skipped()));
+                source.sendMessage(plugin.lang().msg("migration.uuid",
+                        "preserved", report.uuidPreserved(), "derived", report.uuidDerived()));
                 if (report.needsReset() > 0) {
                     source.sendMessage(plugin.lang().msg("migration.needs-reset", "count", report.needsReset()));
                 }

@@ -99,10 +99,16 @@ accepts-transfers = true
 
 ### 从 LibreLogin 迁移
 
-LibreLogin 把 bcrypt 结果拆成三列存储（`algo=BCrypt-2A`、`salt` 单独一列、
-`hashed_password` 只存 `cost$hash`，不含 `$2a$` 前缀），迁移时会按原算法重新拼回标准
-bcrypt 串，因此**玩家可以继续使用原密码登录**；Argon2ID 等本插件不支持的算法会被标记为
-需要重置（占位哈希 `!needs-reset`，可用 `/forgot` 或管理命令改密）。
+迁移会保住三样东西：**UUID、密码、名字**。其中 UUID 是关键——LibreLogin 的 `uuid` 由
+「名字原样（大小写敏感）」派生（`OfflinePlayer:<名字>`），而本插件**新注册**用的是
+「小写规范名」；对含大写字母的名字（实测 962 个账号里有 540 个）两者并不相同。
+若不做迁移直接让玩家重新注册，UUID 会变，LuckPerms 权限组、经济、领地等**所有按 UUID
+存的数据都会对不上**。迁移因此**沿用源库的 `uuid` 原值**，只有源库缺少/非法时才回退派生。
+
+密码方面，LibreLogin 把 bcrypt 拆成三列存储（`algo=BCrypt-2A`、`salt` 单独一列、
+`hashed_password` 只存 `cost$hash`、不含 `$2a$` 前缀），迁移时按原算法重新拼回标准 bcrypt 串，
+**玩家可以继续用原密码登录**；Argon2ID 等本插件不支持的算法会被标记为需要重置
+（占位哈希 `!needs-reset`，可用 `/forgot` 或管理命令改密）。
 
 ```bash
 # SQLite（LibreLogin 的默认小规模部署）
@@ -113,6 +119,9 @@ bcrypt 串，因此**玩家可以继续使用原密码登录**；Argon2ID 等本
 
 # 确认统计无误后去掉 --dry-run 真正写入
 ```
+
+输出会给出「扫描 / 导入 / 跳过 / 需重置 / 未映射 / 保留原 UUID / 回退派生 UUID」的统计，
+请重点确认**保留原 UUID 的数量**符合预期。
 
 迁移**不会自动执行**；`--dry-run` 只统计不写入；源库以只读方式打开。
 若是 `.sql` 备份文件，先导入到任一 MySQL/MariaDB（`mysql -u root -p librelogin < backup.sql`）

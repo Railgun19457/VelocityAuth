@@ -120,7 +120,7 @@ public final class VelocityAuthPlugin {
             RateLimiter rateLimiter = new RateLimiter();
             this.authService = new AuthService(this::config, storage, cache, hasher, pendingBindings,
                     rateLimiter, async, log);
-            this.reconnectService = new ReconnectService(server, this::config, log);
+            this.reconnectService = new ReconnectService(server, this, this::config, log);
             this.sessionRegistry = new AuthSessionRegistry();
 
             SmtpSender smtpSender = new SmtpSender(this::config, async, log);
