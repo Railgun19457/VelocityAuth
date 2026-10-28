@@ -40,7 +40,8 @@ public record VelocityAuthConfig(
 
     // ---------------------------------------------------------------- auth
 
-    public record Auth(AccountName accountName, Password password, int bcryptCost, Session session, Premium premium) {
+    public record Auth(AccountName accountName, Password password, int bcryptCost, Session session, Premium premium,
+                       Bedrock bedrock) {
     }
 
     public record AccountName(int minLength, int maxLength, Pattern pattern, boolean caseInsensitive) {
@@ -54,6 +55,17 @@ public record VelocityAuthConfig(
 
     public record Premium(boolean enabled, boolean keepRealUuid, boolean requirePassword, NameConflict nameConflict) {
         public enum NameConflict { FIRST_COME, PREMIUM_PRIORITY }
+    }
+
+    /**
+     * 基岩端（Floodgate）行为。
+     *
+     * @param autoLink 基岩玩家认证成功后，是否自动把其 Floodgate 身份关联到账号
+     *                 （见 {@code FloodgateHook#linkAccount}）。关联后 Floodgate 会在下次握手
+     *                 原生注入账号的 name/uuid，从而无需改写 UUID、也不会被 Floodgate 判为非
+     *                 Floodgate 玩家而踢出。需要 Floodgate 端启用 player-link。
+     */
+    public record Bedrock(boolean autoLink) {
     }
 
     // ---------------------------------------------------------------- registration / binding
@@ -182,7 +194,8 @@ public record VelocityAuthConfig(
                 premiumNode.bool("require-password", false),
                 conflict.equals("first-come") ? Premium.NameConflict.FIRST_COME : Premium.NameConflict.PREMIUM_PRIORITY);
 
-        Auth auth = new Auth(accountName, password, bcryptCost, session, premium);
+        Auth auth = new Auth(accountName, password, bcryptCost, session, premium,
+                new Bedrock(authNode.section("bedrock").bool("auto-link", true)));
 
         ConfigNode regNode = root.section("registration");
         String gate = regNode.enumValue("gate", "none", "none", "email", "qq");

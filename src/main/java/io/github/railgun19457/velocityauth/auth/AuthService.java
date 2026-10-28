@@ -1,10 +1,12 @@
 package io.github.railgun19457.velocityauth.auth;
 
 import io.github.railgun19457.velocityauth.config.VelocityAuthConfig;
+import io.github.railgun19457.velocityauth.platform.FloodgateHook;
 import io.github.railgun19457.velocityauth.storage.StorageService;
 import io.github.railgun19457.velocityauth.storage.model.Account;
 import io.github.railgun19457.velocityauth.storage.model.AccountStatus;
 import io.github.railgun19457.velocityauth.storage.model.AuditEntry;
+import io.github.railgun19457.velocityauth.storage.model.Identity;
 import io.github.railgun19457.velocityauth.storage.model.IdentityKind;
 import io.github.railgun19457.velocityauth.storage.model.LoginSession;
 import io.github.railgun19457.velocityauth.util.AsyncExecutor;
@@ -41,6 +43,7 @@ public final class AuthService {
     private final PasswordHasher hasher;
     private final PendingBindingStore pendingBindings;
     private final RateLimiter rateLimiter;
+    private final FloodgateHook floodgate;
     private final AsyncExecutor async;
     private final PluginLogger log;
 
@@ -50,6 +53,7 @@ public final class AuthService {
                        PasswordHasher hasher,
                        PendingBindingStore pendingBindings,
                        RateLimiter rateLimiter,
+                       FloodgateHook floodgate,
                        AsyncExecutor async,
                        PluginLogger log) {
         this.config = config;
@@ -58,6 +62,7 @@ public final class AuthService {
         this.hasher = hasher;
         this.pendingBindings = pendingBindings;
         this.rateLimiter = rateLimiter;
+        this.floodgate = floodgate;
         this.async = async;
         this.log = log;
     }
@@ -260,6 +265,65 @@ public final class AuthService {
 
     public void createPendingBinding(String identityKey, String ip, long accountId) {
         pendingBindings.put(identityKey, ip, accountId);
+    }
+
+    /**
+     * 基岩玩家认证成功后，把其 Floodgate 身份**认领**到账号（若启用自动关联）。
+     * <p>
+     * 「禁止多对一」：一个账号同时只保留一个基岩身份。若该账号已被**其它**基岩身份关联，
+     * 旧的会被**自动解绑**（删除身份记录 + 解除 Floodgate link），由新登录的基岩账号顶替；
+     * 反之，基岩账号登录另一个账号时，其旧关联也会自然转移过去（身份记录随之改挂）。
+     * <p>
+     * 关联后 Floodgate 会在**下次握手**原生注入账号的 name/uuid，因此 profile 重写变成空操作，
+     * 也不会因 UUID 被改写而被 Floodgate 判为非 Floodgate 玩家断开。
+     * <p>
+     * 返回的 future 在「认领完成或失败」后完成，调用方应在它完成后再触发重连，保证关联先落库。
+     *
+     * <p>Floodgate link 的 bedrock 侧键用 {@code identity.identifier()}（即 Floodgate 稳定 ID，
+     * 由 XUID 派生）：已关联的基岩玩家其 profile UUID 已经是账号 UUID，不能再用它当键。
+     */
+    public CompletableFuture<Void> claimBedrockAccount(IdentityResolver.Resolved identity, long accountId) {
+        if (!identity.bedrock() || !config.get().auth().bedrock().autoLink()) {
+            return CompletableFuture.completedFuture(null);
+        }
+        final java.util.UUID bedrockKey;
+        try {
+            bedrockKey = java.util.UUID.fromString(identity.identifier());
+        } catch (IllegalArgumentException e) {
+            log.warn("基岩身份标识不是合法 UUID，跳过账号认领：{}", identity.identifier());
+            return CompletableFuture.completedFuture(null);
+        }
+        return async.<Void>supply(() -> {
+            try {
+                evictOtherBedrockIdentities(accountId, identity.identifier());
+                Account account = cache.byId(accountId).orElse(null);
+                if (account == null || !floodgate.linkingAvailable()) {
+                    return null;
+                }
+                log.info("基岩端自动关联：把 Floodgate 身份关联到账号 {}", account.name());
+                floodgate.linkAccount(bedrockKey, account.uuid(), account.name()).join();
+            } catch (RuntimeException e) {
+                log.warn("基岩端账号认领失败：{}", e.getMessage());
+            }
+            return null;
+        }).exceptionally(t -> null);
+    }
+
+    /** 删除账号上「其它」基岩身份，并解除其在 Floodgate 侧的关联（一个账号只保留一个基岩身份）。 */
+    private void evictOtherBedrockIdentities(long accountId, String keepIdentifier) {
+        for (Identity existing : storage.identities().findByAccountId(accountId)) {
+            if (existing.kind() != IdentityKind.BEDROCK || existing.identifier().equals(keepIdentifier)) {
+                continue;
+            }
+            storage.identities().delete(IdentityKind.BEDROCK, existing.identifier());
+            cache.removeIdentity(IdentityKind.BEDROCK, existing.identifier());
+            try {
+                floodgate.unlinkAccount(java.util.UUID.fromString(existing.identifier()));
+            } catch (IllegalArgumentException ignored) {
+                // 身份标识不是合法 UUID（异常数据）：跳过 Floodgate 侧解绑
+            }
+            log.info("基岩端换绑：账号 {} 原基岩身份 {} 已自动解绑", accountId, existing.identifier());
+        }
     }
 
     /** 消费重连绑定（消费即删）。 */

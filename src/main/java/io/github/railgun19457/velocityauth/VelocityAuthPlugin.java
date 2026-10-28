@@ -24,7 +24,6 @@ import io.github.railgun19457.velocityauth.bot.BotSession;
 import io.github.railgun19457.velocityauth.bot.KeyStore;
 import io.github.railgun19457.velocityauth.auth.IdentityResolver;
 import io.github.railgun19457.velocityauth.platform.FloodgateHook;
-import io.github.railgun19457.velocityauth.migrate.LibreLoginMigrator;
 import io.github.railgun19457.velocityauth.bot.PairingService;
 import io.github.railgun19457.velocityauth.command.CommandRegistrar;
 import io.github.railgun19457.velocityauth.config.ConfigService;
@@ -84,7 +83,8 @@ public final class VelocityAuthPlugin {
     private BotServer botServer;
     private FloodgateHook floodgate;
     private IdentityResolver identityResolver;
-    private LibreLoginMigrator migrator;
+
+    private RoutingListener routingListener;
 
     private volatile boolean enabled;
 
@@ -119,7 +119,7 @@ public final class VelocityAuthPlugin {
             PendingBindingStore pendingBindings = new PendingBindingStore();
             RateLimiter rateLimiter = new RateLimiter();
             this.authService = new AuthService(this::config, storage, cache, hasher, pendingBindings,
-                    rateLimiter, async, log);
+                    rateLimiter, floodgate, async, log);
             this.reconnectService = new ReconnectService(server, this, this::config, log);
             this.sessionRegistry = new AuthSessionRegistry();
 
@@ -133,7 +133,6 @@ public final class VelocityAuthPlugin {
                     async, log);
             startBotServer();
             this.registrationFlow = new RegistrationFlow(this::config, authService, verificationService, async, log);
-            this.migrator = new LibreLoginMigrator(storage, log);
             this.bindingService = new BindingService(this::config, storage, async, log);
             this.recoveryService = new RecoveryService(this::config, storage, verificationService, async, log);
 
@@ -165,7 +164,7 @@ public final class VelocityAuthPlugin {
 
     private void registerListeners() {
         LoginListener loginListener = new LoginListener(this, sessionRegistry);
-        RoutingListener routingListener = new RoutingListener(this, sessionRegistry);
+        this.routingListener = new RoutingListener(this, sessionRegistry);
         server.getEventManager().register(this, loginListener);
         server.getEventManager().register(this, routingListener);
         server.getEventManager().register(this, new CommandGuardListener(this, sessionRegistry));
@@ -312,8 +311,9 @@ public final class VelocityAuthPlugin {
         return identityResolver;
     }
 
-    public LibreLoginMigrator migrator() {
-        return migrator;
+    /** 路由监听器（已认证玩家的目标子服选择）。 */
+    public RoutingListener routing() {
+        return routingListener;
     }
 
     /** 服务器名（用于邮件主题），取代理 MOTD 的纯文本。 */

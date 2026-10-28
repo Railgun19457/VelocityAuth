@@ -8,7 +8,6 @@ import io.github.railgun19457.velocityauth.auth.AuthOutcomes;
 import io.github.railgun19457.velocityauth.auth.AuthSession;
 import io.github.railgun19457.velocityauth.bot.KeyStore;
 import io.github.railgun19457.velocityauth.bot.PairingService;
-import io.github.railgun19457.velocityauth.migrate.LibreLoginMigrator;
 import io.github.railgun19457.velocityauth.storage.model.Account;
 import io.github.railgun19457.velocityauth.storage.model.AccountStatus;
 import io.github.railgun19457.velocityauth.storage.model.AuditEntry;
@@ -62,7 +61,6 @@ public final class AdminCommand implements SimpleCommand {
             case "forcelogin" -> forcelogin(source, args);
             case "pair" -> pair(source, args);
             case "client" -> client(source, args);
-            case "migrate" -> migrate(source, args);
             default -> usage(source);
         }
     }
@@ -79,13 +77,16 @@ public final class AdminCommand implements SimpleCommand {
         source.sendMessage(plugin.lang().msg("admin.status.database", "value",
                 plugin.storage().describe() + (plugin.storage().ping() ? "" : " (不可用)")));
         source.sendMessage(plugin.lang().msg("admin.status.smtp", "value",
-                plugin.config().smtp().enabled() ? plugin.lang().rawText("admin.status.enabled")
-                        : plugin.lang().rawText("admin.status.disabled")));
+                plugin.config().smtp().enabled() ? plugin.lang().raw("admin.status.enabled")
+                        : plugin.lang().raw("admin.status.disabled")));
         var bot = plugin.botServer();
-        source.sendMessage(plugin.lang().msg("admin.status.qqbot", "value", bot == null
-                ? plugin.lang().rawText("admin.status.disabled")
-                : plugin.lang().rawText("admin.status.connected") + " (" + bot.readyCount() + ")"
-                        + " " + plugin.lang().rawText("admin.status.disconnected") + " (" + bot.pendingCount() + ")"));
+        Component qqbot = bot == null
+                ? plugin.lang().raw("admin.status.disabled")
+                : plugin.lang().raw("admin.status.connected")
+                        .append(Component.text(" (" + bot.readyCount() + ") "))
+                        .append(plugin.lang().raw("admin.status.disconnected"))
+                        .append(Component.text(" (" + bot.pendingCount() + ")"));
+        source.sendMessage(plugin.lang().msg("admin.status.qqbot", "value", qqbot));
         source.sendMessage(plugin.lang().msg("admin.status.sessions", "value",
                 plugin.sessionRegistry().authenticatedSessions().size()));
         source.sendMessage(plugin.lang().msg("admin.status.pending-verifications", "value",
@@ -94,8 +95,12 @@ public final class AdminCommand implements SimpleCommand {
                 plugin.keyStore() == null ? 0 : plugin.keyStore().clients().size()));
         source.sendMessage(plugin.lang().msg("admin.status.floodgate", "value",
                 plugin.identities().floodgateAvailable()
-                        ? plugin.lang().rawText("admin.status.enabled")
-                        : plugin.lang().rawText("admin.status.disabled")));
+                        ? plugin.lang().raw("admin.status.enabled")
+                        : plugin.lang().raw("admin.status.disabled")));
+        source.sendMessage(plugin.lang().msg("admin.status.bedrock-link", "value",
+                plugin.floodgate().linkingAvailable()
+                        ? plugin.lang().raw("admin.status.enabled")
+                        : plugin.lang().raw("admin.status.disabled")));
     }
 
     private void reload(CommandSource source) {
@@ -194,21 +199,26 @@ public final class AdminCommand implements SimpleCommand {
         source.sendMessage(plugin.lang().msg("admin.account.info-status", "value", account.status().dbValue()));
         List<Binding> bindings = plugin.bindings().bindings(account.id());
         source.sendMessage(plugin.lang().msg("admin.account.info-email", "value",
-                bindings.stream().filter(b -> b.type() == BindingType.EMAIL).map(Binding::identifier)
-                        .findFirst().orElse(plugin.lang().rawText("admin.account.none"))));
+                orNone(bindings.stream().filter(b -> b.type() == BindingType.EMAIL).map(Binding::identifier)
+                        .findFirst())));
         source.sendMessage(plugin.lang().msg("admin.account.info-qq", "value",
-                bindings.stream().filter(b -> b.type() == BindingType.QQ).map(Binding::identifier)
-                        .findFirst().orElse(plugin.lang().rawText("admin.account.none"))));
+                orNone(bindings.stream().filter(b -> b.type() == BindingType.QQ).map(Binding::identifier)
+                        .findFirst())));
         source.sendMessage(plugin.lang().msg("admin.account.info-last-server", "value",
-                account.lastServer() == null ? plugin.lang().rawText("admin.account.none") : account.lastServer()));
+                account.lastServer() == null ? plugin.lang().raw("admin.account.none") : account.lastServer()));
         source.sendMessage(plugin.lang().msg("admin.account.info-identities", "value",
                 plugin.storage().identities().countByAccountId(account.id())));
         source.sendMessage(plugin.lang().msg("admin.account.info-created", "value",
                 TIME_FORMAT.format(Instant.ofEpochSecond(account.createdAt()))));
         source.sendMessage(plugin.lang().msg("admin.account.info-last-login", "value",
-                account.lastLoginAt() == null ? plugin.lang().rawText("admin.account.none")
+                account.lastLoginAt() == null ? plugin.lang().raw("admin.account.none")
                         : TIME_FORMAT.format(Instant.ofEpochSecond(account.lastLoginAt()))
                                 + " (" + (account.lastIp() == null ? "?" : account.lastIp()) + ")"));
+    }
+
+    /** 绑定值缺失时用本地化的「无」组件占位，避免字面量标签。 */
+    private Object orNone(Optional<String> value) {
+        return value.<Object>map(v -> v).orElseGet(() -> plugin.lang().raw("admin.account.none"));
     }
 
     private Optional<Account> findAccount(String name) {
@@ -394,90 +404,11 @@ public final class AdminCommand implements SimpleCommand {
         return source instanceof Player player ? player.getUsername() : "console";
     }
 
-    // ------------------------------------------------------------------ migrate
-
-    private void migrate(CommandSource source, String[] args) {
-        if (args.length < 2 || !args[1].equalsIgnoreCase("librelogin")) {
-            source.sendMessage(plugin.lang().msg("migration.usage"));
-            return;
-        }
-        boolean dryRun = false;
-        java.nio.file.Path file = null;
-        String url = null;
-        String user = null;
-        String password = null;
-        for (int i = 2; i < args.length; i++) {
-            if (args[i].equalsIgnoreCase("--dry-run")) {
-                dryRun = true;
-            } else if (args[i].equalsIgnoreCase("--file") && i + 1 < args.length) {
-                file = java.nio.file.Path.of(args[++i]);
-            } else if (args[i].equalsIgnoreCase("--url") && i + 1 < args.length) {
-                url = args[++i];
-            } else if (args[i].equalsIgnoreCase("--user") && i + 1 < args.length) {
-                user = args[++i];
-            } else if (args[i].equalsIgnoreCase("--password") && i + 1 < args.length) {
-                password = args[++i];
-            }
-        }
-        final boolean runDry = dryRun;
-        final String jdbcUrl = url;
-        final String jdbcUser = user;
-        final String jdbcPassword = password;
-        final java.nio.file.Path explicitFile = file;
-
-        source.sendMessage(plugin.lang().msg("migration.header"));
-        plugin.async().run(() -> {
-            try {
-                LibreLoginMigrator.Source migrationSource;
-                if (jdbcUrl != null && !jdbcUrl.isBlank()) {
-                    // 生产环境常用 MariaDB/MySQL，例如：
-                    // --url jdbc:mysql://127.0.0.1:3306/librelogin --user root --password ***
-                    migrationSource = LibreLoginMigrator.Source.jdbc(jdbcUrl, jdbcUser, jdbcPassword);
-                } else {
-                    java.nio.file.Path target = explicitFile;
-                    if (target == null) {
-                        target = LibreLoginMigrator.findDefaultDatabase(plugin.dataDirectory()).orElse(null);
-                    }
-                    if (target == null) {
-                        source.sendMessage(plugin.lang().msg("migration.not-found"));
-                        return;
-                    }
-                    migrationSource = LibreLoginMigrator.Source.sqliteFile(target);
-                }
-                source.sendMessage(plugin.lang().msg("migration.started"));
-                var report = plugin.migrator().migrate(migrationSource, runDry);
-                source.sendMessage(plugin.lang().msg("migration.imported", "count", report.imported()));
-                source.sendMessage(plugin.lang().msg("migration.skipped", "count", report.skipped()));
-                source.sendMessage(plugin.lang().msg("migration.uuid",
-                        "preserved", report.uuidPreserved(), "derived", report.uuidDerived()));
-                if (report.needsReset() > 0) {
-                    source.sendMessage(plugin.lang().msg("migration.needs-reset", "count", report.needsReset()));
-                }
-                if (report.unmapped() > 0) {
-                    source.sendMessage(plugin.lang().msg("migration.unmapped", "count", report.unmapped()));
-                }
-                if (report.emails() > 0) {
-                    source.sendMessage(plugin.lang().msg("migration.emails", "count", report.emails()));
-                }
-                if (report.dryRun()) {
-                    source.sendMessage(plugin.lang().msg("migration.dry-run"));
-                }
-                source.sendMessage(plugin.lang().msg("migration.done"));
-                plugin.log().info("LibreLogin 迁移完成：扫描 {}，导入 {}，跳过 {}，需重置 {}，未映射 {}",
-                        report.scanned(), report.imported(), report.skipped(), report.needsReset(),
-                        report.unmapped());
-            } catch (Exception e) {
-                source.sendMessage(plugin.lang().msg("generic.internal-error"));
-                plugin.log().error("迁移失败：" + e.getMessage(), e);
-            }
-        });
-    }
-
     @Override
     public List<String> suggest(Invocation invocation) {
         String[] args = invocation.arguments();
         if (args.length <= 1) {
-            return List.of("status", "reload", "account", "sessions", "forcelogin", "pair", "client", "migrate");
+            return List.of("status", "reload", "account", "sessions", "forcelogin", "pair", "client");
         }
         return switch (args[0].toLowerCase(Locale.ROOT)) {
             case "account" -> args.length == 3
@@ -486,8 +417,6 @@ public final class AdminCommand implements SimpleCommand {
             case "sessions" -> args.length == 2 ? List.of("list", "kick") : List.of();
             case "pair" -> args.length == 2 ? List.of("new", "list", "revoke") : List.of();
             case "client" -> args.length == 2 ? List.of("list", "revoke") : List.of();
-            case "migrate" -> args.length == 2 ? List.of("librelogin")
-                    : List.of("--dry-run", "--file", "--url", "--user", "--password");
             default -> List.of();
         };
     }

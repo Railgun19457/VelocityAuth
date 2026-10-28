@@ -73,6 +73,11 @@ public final class AccountCache {
         identityIndex.put(identityKey(kind, identifier), accountId);
     }
 
+    /** 移除某条身份映射（例如基岩账号被新绑定顶替时）。 */
+    public void removeIdentity(IdentityKind kind, String identifier) {
+        identityIndex.remove(identityKey(kind, identifier));
+    }
+
     public void remove(long accountId) {
         Account removed = byId.remove(accountId);
         if (removed != null) {

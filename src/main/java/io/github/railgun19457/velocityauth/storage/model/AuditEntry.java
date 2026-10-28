@@ -22,5 +22,4 @@ public record AuditEntry(
     public static final String CHANGE_PASSWORD = "change_password";
     public static final String FORCELOGIN = "forcelogin";
     public static final String SESSION_RESTORE = "session_restore";
-    public static final String MIGRATE = "migrate";
 }

@@ -141,7 +141,10 @@ public final class LangService {
         for (int i = 0; i + 1 < placeholders.length; i += 2) {
             String key = String.valueOf(placeholders[i]);
             Object raw = placeholders[i + 1];
-            String value = raw == null ? "" : MessageRenderer.escapeTags(String.valueOf(raw));
+            // 已渲染的组件直接按 MiniMessage 插入（保留其样式），其余内容一律转义为纯文本
+            String value = raw instanceof Component component
+                    ? MessageRenderer.toMiniMessage(component)
+                    : raw == null ? "" : MessageRenderer.escapeTags(String.valueOf(raw));
             out = out.replace("{" + key + "}", value);
         }
         return out;

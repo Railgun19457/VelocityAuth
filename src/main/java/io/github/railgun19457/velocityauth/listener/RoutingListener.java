@@ -57,12 +57,13 @@ public final class RoutingListener {
             return;
         }
 
-        Optional<RegisteredServer> target = pickTarget(cfg, session);
+        Optional<RegisteredServer> target = targetServer(session);
         target.ifPresent(event::setInitialServer);
     }
 
     /** 已认证玩家的目标服务器：优先记忆子服，否则默认服。 */
-    private Optional<RegisteredServer> pickTarget(VelocityAuthConfig cfg, AuthSession session) {
+    public Optional<RegisteredServer> targetServer(AuthSession session) {
+        VelocityAuthConfig cfg = plugin.config();
         if (cfg.servers().rememberLast() && session.account() != null) {
             Account fresh = plugin.authService().cache().byId(session.account().id())
                     .orElse(session.account());

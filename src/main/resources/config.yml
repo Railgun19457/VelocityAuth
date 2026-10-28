@@ -44,6 +44,9 @@ auth:
     keep-real-uuid: true
     require-password: false          # 正版玩家是否仍需 /login
     name-conflict: first-come        # first-come | premium-priority
+  bedrock:
+    auto-link: true                  # 基岩玩家认证成功后自动关联 Floodgate 身份
+                                     # （需 Floodgate 端启用 player-link；否则回退为改写 UUID）
 
 registration:
   gate: none                         # none | email | qq

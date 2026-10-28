@@ -21,7 +21,6 @@ VelocityAuth 是一个运行在 Velocity 上的账号认证插件：**账号名�
 - 可选会话保持（同 IP 免密登录，**默认关闭**）
 - 与 QQ bot 的安全 WebSocket 通道：Ed25519 身份 + X25519/AES-256-GCM，插件作服务端
 - 完整管理命令：状态查询、账号管理、会话踢出、**强制登录（顶号）**、审计日志
-- LibreLogin 旧库迁移工具（BCrypt 哈希可直接复用）
 - MiniMessage 文案，中英双语 `lang/zh_cn.yml` `lang/en_us.yml`
 - SQLite（默认）/ MySQL 双数据库
 
@@ -92,8 +91,6 @@ accepts-transfers = true
 | `forcelogin <账号> [--kick]` | **强制登录为指定账号**（顶号），`--kick` 先踢掉该账号现有会话 |
 | `pair new` / `pair list` / `pair revoke <id>` | bot 配对码管理 |
 | `client list` / `client revoke <id>` | 已配对 bot 客户端管理 |
-| `migrate librelogin [--dry-run] [--file <路径>]` | 从 LibreLogin 的 SQLite 库迁移 |
-| `migrate librelogin --url <JDBC URL> [--user <用户>] [--password <密码>]` | 从 LibreLogin 的 MySQL / MariaDB 库迁移 |
 
 > 插件**不提供查看明文密码**：密码以 bcrypt 单向哈希存储，插件本就拿不到明文；
 > 需要顶号时请用 `forcelogin`。
@@ -114,39 +111,6 @@ UUID，历史数据全部对不上。
 
 账号名仍然**不区分大小写**：唯一性由 `accounts.name_lower` 约束保证，UUID 只在注册时算一次并落库，
 之后一律读库里的值（`Tacker` 与 `tacker` 不能同时注册）。
-
-### 从 LibreLogin 迁移
-
-即使不迁移，老玩家自己 `/register <原名> <新密码>` 也能拿回原 UUID、数据不丢。但迁移仍然值得做：
-
-- **占住名字（最重要）**：不迁移的话老玩家的名字是**空着的**，别人先注册 `<原名>` 就会拿到
-  `offline(<原名>)` —— 也就是那个人的 UUID，从而**继承他的权限组、经济、领地**。迁移等于提前把名字锁回本人
-- **保住密码**：迁移后玩家直接用原密码登录，不必全员重设
-- 保住 `premium_uuid`、`last_server`、邮箱绑定
-- **沿用历史 uuid**：改名过的账号（源库 `uuid` 与当前名字已对不上）只能靠迁移沿用原值，否则历史数据丢失
-
-LibreLogin 把 bcrypt 拆成三列存储（`algo=BCrypt-2A`、`salt` 单独一列、
-`hashed_password` 只存 `cost$hash`、不含 `$2a$` 前缀），迁移时按原算法重新拼回标准 bcrypt 串，
-**玩家可以继续用原密码登录**；Argon2ID 等本插件不支持的算法会被标记为需要重置
-（占位哈希 `!needs-reset`，可用 `/forgot` 或管理命令改密）。
-
-```bash
-# SQLite（LibreLogin 的默认小规模部署）
-/vauth migrate librelogin --file plugins/librelogin/librepremium_data.db --dry-run
-
-# MySQL / MariaDB（生产常见）
-/vauth migrate librelogin --url jdbc:mysql://127.0.0.1:3306/librelogin --user root --password *** --dry-run
-
-# 确认统计无误后去掉 --dry-run 真正写入
-```
-
-输出会给出「扫描 / 导入 / 跳过 / 需重置 / 未映射 / 保留原 UUID / 回退派生 UUID」的统计。
-正常情况下「保留原 UUID」应等于导入数（派生算法一致）；若出现「回退派生」，说明源库缺少或存在
-非法 `uuid`，请人工核对那几个账号。
-
-迁移**不会自动执行**；`--dry-run` 只统计不写入；源库以只读方式打开。
-若是 `.sql` 备份文件，先导入到任一 MySQL/MariaDB（`mysql -u root -p librelogin < backup.sql`）
-再迁移，或导入后导出为 SQLite 用 `--file`。
 
 ## 权限
 

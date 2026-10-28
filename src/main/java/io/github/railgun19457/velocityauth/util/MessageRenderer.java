@@ -39,6 +39,19 @@ public final class MessageRenderer {
     }
 
     /**
+     * 把组件序列化回 MiniMessage 文本，供其作为占位符值插入模板时使用。
+     * <p>
+     * 与 {@link #escapeTags(String)} 相对：已经渲染过的组件是可信的，插入模板后应继续参与解析
+     * （例如 {@code <green>已启用</green>} 需要保持绿色），而不是被转义成字面量。
+     */
+    public static String toMiniMessage(Component component) {
+        if (component == null) {
+            return "";
+        }
+        return MINI.serialize(component);
+    }
+
+    /**
      * 转义 MiniMessage 标签起始符，避免玩家可控内容被当作标签解析。
      */
     public static String escapeTags(String input) {

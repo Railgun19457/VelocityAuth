@@ -1,12 +1,15 @@
 package io.github.railgun19457.velocityauth.config;
 
 import io.github.railgun19457.velocityauth.lang.LangService;
+import net.kyori.adventure.text.Component;
+import net.kyori.adventure.text.format.NamedTextColor;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
 
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -58,5 +61,17 @@ class ConfigAndLangTest {
     @Test
     void unknownPlaceholderIsLeftIntact() {
         assertEquals("a={b}", LangService.applyPlaceholders("a={b}", "c", "d"));
+    }
+
+    @Test
+    void componentPlaceholdersKeepTheirFormatting() {
+        // 组件值不应被转义，否则会显示字面量标签（如 <green>已启用</green>）
+        String out = LangService.applyPlaceholders("<white>{value}</white>", "value",
+                Component.text("已启用", NamedTextColor.GREEN));
+        assertTrue(out.contains("<green>"), out);
+        assertFalse(out.contains("\\<"), out);
+        // 纯文本值仍然转义
+        assertEquals("<white>\\<script></white>",
+                LangService.applyPlaceholders("<white>{value}</white>", "value", "<script>"));
     }
 }

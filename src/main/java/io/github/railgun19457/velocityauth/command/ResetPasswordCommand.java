@@ -62,9 +62,8 @@ public final class ResetPasswordCommand extends PlayerCommandSupport {
                         player.sendMessage(plugin.lang().msg("generic.internal-error"));
                         return;
                     }
-                    player.sendMessage(plugin.lang().msg("command.resetpassword.success"));
-                    plugin.authService().createPendingBinding(identity.key(), ip, accountId);
-                    plugin.reconnectService().reconnect(player, plugin.lang().msg("auth.login-disconnect"));
+                    finishAuthAndReconnect(player, identity, ip, accountId,
+                            plugin.lang().msg("command.resetpassword.success"));
                 })
                 .exceptionally(throwable -> {
                     plugin.log().error("重置密码命令异常", throwable);

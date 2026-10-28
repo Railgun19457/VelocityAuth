@@ -104,9 +104,8 @@ public final class RegisterCommand extends PlayerCommandSupport {
         }
         started.completion().thenAccept(result -> {
             if (result.status() == AuthOutcomes.RegisterStatus.SUCCESS) {
-                plugin.authService().createPendingBinding(identity.key(), ip, result.account().id());
-                player.sendMessage(plugin.lang().msg("command.register.success"));
-                plugin.reconnectService().reconnect(player, plugin.lang().msg("auth.login-disconnect"));
+                finishAuthAndReconnect(player, identity, ip, result.account().id(),
+                        plugin.lang().msg("command.register.success"));
             } else {
                 player.sendMessage(messageFor(result.status()));
             }
@@ -115,9 +114,8 @@ public final class RegisterCommand extends PlayerCommandSupport {
 
     private void handle(Player player, io.github.railgun19457.velocityauth.auth.IdentityResolver.Resolved identity, String ip, AuthOutcomes.Register result) {
         if (result.status() == AuthOutcomes.RegisterStatus.SUCCESS) {
-            plugin.authService().createPendingBinding(identity.key(), ip, result.account().id());
-            player.sendMessage(plugin.lang().msg("command.register.success"));
-            plugin.reconnectService().reconnect(player, plugin.lang().msg("auth.login-disconnect"));
+            finishAuthAndReconnect(player, identity, ip, result.account().id(),
+                    plugin.lang().msg("command.register.success"));
             return;
         }
         player.sendMessage(messageFor(result.status()));

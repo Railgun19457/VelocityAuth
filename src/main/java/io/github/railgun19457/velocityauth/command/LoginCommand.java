@@ -38,11 +38,8 @@ public final class LoginCommand extends PlayerCommandSupport {
 
     private void handle(Player player, io.github.railgun19457.velocityauth.auth.IdentityResolver.Resolved identity, String ip, AuthOutcomes.Login result) {
         switch (result.status()) {
-            case SUCCESS -> {
-                plugin.authService().createPendingBinding(identity.key(), ip, result.account().id());
-                player.sendMessage(plugin.lang().msg("command.login.success"));
-                plugin.reconnectService().reconnect(player, plugin.lang().msg("auth.login-disconnect"));
-            }
+            case SUCCESS -> finishAuthAndReconnect(player, identity, ip, result.account().id(),
+                    plugin.lang().msg("command.login.success"));
             case WRONG_PASSWORD -> player.sendMessage(plugin.lang().msg("command.login.wrong-password"));
             case LOCKED -> player.sendMessage(plugin.lang().msg("command.login.locked"));
             case RATE_LIMITED -> player.sendMessage(plugin.lang().msg("command.login.rate-limited"));
