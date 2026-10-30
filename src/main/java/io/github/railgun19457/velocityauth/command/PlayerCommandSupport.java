@@ -70,6 +70,62 @@ public abstract class PlayerCommandSupport implements SimpleCommand {
     }
 
     /**
+     * 未认证玩家可用（登录 / 注册 / 找回 / 重置密码）。
+     * <p>
+     * 同时作为 Velocity 命令节点的 {@code requires} 谓词：返回 false 时该命令**不会**出现在
+     * 玩家的补全列表里，也无法执行。
+     */
+    protected boolean availableWhenUnauthenticated(Invocation invocation) {
+        if (!(invocation.source() instanceof Player player)) {
+            return false;
+        }
+        AuthSession session = registry.get(player).orElse(null);
+        return session == null || !session.authenticated();
+    }
+
+    /** 已认证玩家可用（登出 / 改密 / 绑定 / 解绑 / 注销）。 */
+    protected boolean availableWhenAuthenticated(Invocation invocation) {
+        return invocation.source() instanceof Player player
+                && registry.get(player).map(AuthSession::authenticated).orElse(false);
+    }
+
+    /** 绑定渠道的可选值（补全用）。 */
+    private static final java.util.List<String> BINDING_CHANNELS = java.util.List.of("email", "qq");
+
+    /**
+     * 在指定参数位补全 {@code email} / {@code qq}。
+     * <p>
+     * 只在玩家正输入该位置时给建议；账号名等参数不做补全（避免暴露哪些账号存在）。
+     */
+    protected java.util.List<String> suggestBindingChannel(Invocation invocation, int index) {
+        String[] args = invocation.arguments();
+        if (args.length != index + 1) {
+            return java.util.List.of();
+        }
+        String prefix = args[index] == null ? "" : args[index].toLowerCase(java.util.Locale.ROOT);
+        return BINDING_CHANNELS.stream().filter(value -> value.startsWith(prefix)).toList();
+    }
+
+    /**
+     * 提示玩家完成「注册后必须绑定」的渠道（多选一）。
+     * <p>
+     * 只按配置输出可用的渠道行；未配置要求时不输出任何内容。
+     */
+    protected void sendBindingRequirement(Player player) {
+        java.util.List<io.github.railgun19457.velocityauth.storage.model.BindingType> required =
+                plugin.config().registration().requireBinding();
+        if (required.isEmpty()) {
+            return;
+        }
+        if (required.contains(io.github.railgun19457.velocityauth.storage.model.BindingType.EMAIL)) {
+            player.sendMessage(plugin.lang().msg("command.bind.required-email"));
+        }
+        if (required.contains(io.github.railgun19457.velocityauth.storage.model.BindingType.QQ)) {
+            player.sendMessage(plugin.lang().msg("command.bind.required-qq"));
+        }
+    }
+
+    /**
      * 认证成功收尾。
      * <p>
      * 分两条路：
@@ -115,6 +171,8 @@ public abstract class PlayerCommandSupport implements SimpleCommand {
         }
         // 先认证：targetServer 要读「记忆的上次子服」，它取自 session.account()
         session.authenticate(account);
+        // 免重连路径不会再触发 PostLogin，这里补记会话保持（否则同名登录无法免密重连）
+        plugin.authService().recordSessionAsync(account.id(), session.ip());
         Optional<RegisteredServer> target = plugin.routing().targetServer(session);
         if (target.isEmpty()) {
             return false;

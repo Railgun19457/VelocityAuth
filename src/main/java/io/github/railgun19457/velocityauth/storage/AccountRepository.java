@@ -3,6 +3,7 @@ package io.github.railgun19457.velocityauth.storage;
 import io.github.railgun19457.velocityauth.storage.model.Account;
 import io.github.railgun19457.velocityauth.storage.model.AccountStatus;
 
+import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
@@ -109,32 +110,40 @@ public final class AccountRepository {
 
     public long insert(String name, String nameLower, UUID uuid, String passwordHash,
                        AccountStatus status, UUID premiumUuid, long createdAt) {
-        return database.inTransaction(connection -> {
-            try (PreparedStatement ps = connection.prepareStatement(
-                    "INSERT INTO accounts (name, name_lower, uuid, password_hash, status, premium_uuid,"
-                            + " last_server, created_at, last_login_at, last_ip)"
-                            + " VALUES (?, ?, ?, ?, ?, ?, NULL, ?, NULL, NULL)",
-                    Statement.RETURN_GENERATED_KEYS)) {
-                ps.setString(1, name);
-                ps.setString(2, nameLower);
-                ps.setString(3, uuid.toString());
-                ps.setString(4, passwordHash);
-                ps.setString(5, status.dbValue());
-                if (premiumUuid == null) {
-                    ps.setNull(6, java.sql.Types.VARCHAR);
-                } else {
-                    ps.setString(6, premiumUuid.toString());
-                }
-                ps.setLong(7, createdAt);
-                ps.executeUpdate();
-                try (ResultSet keys = ps.getGeneratedKeys()) {
-                    if (keys.next()) {
-                        return keys.getLong(1);
-                    }
+        return database.inTransaction(connection -> insert(connection, name, nameLower, uuid, passwordHash,
+                status, premiumUuid, createdAt));
+    }
+
+    /**
+     * 在调用方提供的事务连接内插入账号（供注册流程把账号 + 身份 + 绑定写入同一事务）。
+     * 不在此方法内提交/回滚。
+     */
+    long insert(Connection connection, String name, String nameLower, UUID uuid, String passwordHash,
+                AccountStatus status, UUID premiumUuid, long createdAt) throws SQLException {
+        try (PreparedStatement ps = connection.prepareStatement(
+                "INSERT INTO accounts (name, name_lower, uuid, password_hash, status, premium_uuid,"
+                        + " last_server, created_at, last_login_at, last_ip)"
+                        + " VALUES (?, ?, ?, ?, ?, ?, NULL, ?, NULL, NULL)",
+                Statement.RETURN_GENERATED_KEYS)) {
+            ps.setString(1, name);
+            ps.setString(2, nameLower);
+            ps.setString(3, uuid.toString());
+            ps.setString(4, passwordHash);
+            ps.setString(5, status.dbValue());
+            if (premiumUuid == null) {
+                ps.setNull(6, java.sql.Types.VARCHAR);
+            } else {
+                ps.setString(6, premiumUuid.toString());
+            }
+            ps.setLong(7, createdAt);
+            ps.executeUpdate();
+            try (ResultSet keys = ps.getGeneratedKeys()) {
+                if (keys.next()) {
+                    return keys.getLong(1);
                 }
             }
-            throw new StorageException("插入账号后未返回主键");
-        });
+        }
+        throw new StorageException("插入账号后未返回主键");
     }
 
     public void updatePasswordHash(long id, String passwordHash) {
@@ -190,6 +199,24 @@ public final class AccountRepository {
             try (PreparedStatement ps = connection.prepareStatement("DELETE FROM accounts WHERE id = ?")) {
                 ps.setLong(1, id);
                 return ps.executeUpdate();
+            }
+        });
+    }
+
+    /** 仍处于 {@code pending_binding} 且注册时间早于 {@code cutoff}（unix 秒）的账号。 */
+    public List<Account> findPendingOlderThan(long cutoff) {
+        return database.withConnection(connection -> {
+            try (PreparedStatement ps = connection.prepareStatement(
+                    "SELECT " + COLUMNS + " FROM accounts WHERE status = ? AND created_at < ?")) {
+                ps.setString(1, AccountStatus.PENDING_BINDING.dbValue());
+                ps.setLong(2, cutoff);
+                try (ResultSet rs = ps.executeQuery()) {
+                    List<Account> out = new ArrayList<>();
+                    while (rs.next()) {
+                        out.add(map(rs));
+                    }
+                    return out;
+                }
             }
         });
     }

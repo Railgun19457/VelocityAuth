@@ -49,7 +49,9 @@ class BindingServiceTest {
                                 "domain", Map.of("mode", "whitelist", "list", List.of("qq.com"))),
                         "qq", Map.of("enabled", true, "max-accounts-per-qq", 1)))));
         async = new AsyncExecutor();
-        bindings = new BindingService(() -> config, storage, async, new PluginLogger(NOPLogger.NOP_LOGGER));
+        bindings = new BindingService(() -> config, storage,
+                new BindingIndex(storage.bindings(), new PluginLogger(NOPLogger.NOP_LOGGER)),
+                async, new PluginLogger(NOPLogger.NOP_LOGGER));
 
         long aliceId = storage.accounts().insert("Alice", "alice", UUID.randomUUID(), "h",
                 AccountStatus.ACTIVE, null, 1L);

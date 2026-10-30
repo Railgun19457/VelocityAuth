@@ -5,8 +5,6 @@ import io.github.railgun19457.velocityauth.storage.model.LoginSession;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
-import java.util.ArrayList;
-import java.util.List;
 import java.util.Optional;
 
 /**
@@ -51,20 +49,17 @@ public final class SessionRepository {
         });
     }
 
-    /** 仅按 IP 查找（bind-to-ip=false 时使用）。 */
-    public List<LoginSession> findAllValidByIp(String ip, long now) {
+    /** 仅按账号查找任意有效会话（bind-to-ip=false 时使用，不校验 IP）。 */
+    public Optional<LoginSession> findAnyValid(long accountId, long now) {
         return database.withConnection(connection -> {
             try (PreparedStatement ps = connection.prepareStatement(
                     "SELECT id, account_id, ip, created_at, expires_at FROM login_sessions"
-                            + " WHERE ip = ? AND expires_at > ? ORDER BY expires_at DESC")) {
-                ps.setString(1, ip);
+                            + " WHERE account_id = ? AND expires_at > ?"
+                            + " ORDER BY expires_at DESC")) {
+                ps.setLong(1, accountId);
                 ps.setLong(2, now);
                 try (ResultSet rs = ps.executeQuery()) {
-                    List<LoginSession> out = new ArrayList<>();
-                    while (rs.next()) {
-                        out.add(map(rs));
-                    }
-                    return out;
+                    return rs.next() ? Optional.of(map(rs)) : Optional.<LoginSession>empty();
                 }
             }
         });

@@ -17,6 +17,7 @@ import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 @Timeout(30)
@@ -149,5 +150,30 @@ class StorageTest {
         Schema.migrate(storage.database(), NOPLogger.NOP_LOGGER);
         Schema.migrate(storage.database(), NOPLogger.NOP_LOGGER);
         assertTrue(storage.ping());
+    }
+
+    @Test
+    void createAccountWritesAccountIdentityAndBindingsAtomically() {
+        long id = storage.createAccount("Zoe", "zoe", UUID.randomUUID(), "$2a$10$h",
+                AccountStatus.ACTIVE, null, 500L, IdentityKind.JAVA, "zoe", "zoe@qq.com", "10009");
+
+        assertEquals("Zoe", storage.accounts().findById(id).orElseThrow().name());
+        assertEquals(id, storage.identities().find(IdentityKind.JAVA, "zoe").orElseThrow().accountId());
+        assertEquals("zoe@qq.com",
+                storage.bindings().find(id, BindingType.EMAIL).orElseThrow().identifier());
+        assertEquals("10009", storage.bindings().find(id, BindingType.QQ).orElseThrow().identifier());
+    }
+
+    @Test
+    void createAccountRollsBackEverythingOnFailure() {
+        storage.createAccount("Dup", "dup", UUID.randomUUID(), "h", AccountStatus.ACTIVE, null, 1L,
+                IdentityKind.JAVA, "dup", null, null);
+
+        assertThrows(StorageException.class, () -> storage.createAccount("Dup2", "dup", UUID.randomUUID(), "h",
+                AccountStatus.ACTIVE, null, 2L, IdentityKind.JAVA, "dup2", "dup2@qq.com", null));
+
+        // 名称冲突导致整体回滚：不应残留身份 / 绑定 / 第二个账号
+        assertEquals(1, storage.accounts().count());
+        assertTrue(storage.identities().find(IdentityKind.JAVA, "dup2").isEmpty(), "回滚后不应残留身份");
     }
 }

@@ -40,6 +40,15 @@ public final class LoginCommand extends PlayerCommandSupport {
         switch (result.status()) {
             case SUCCESS -> finishAuthAndReconnect(player, identity, ip, result.account().id(),
                     plugin.lang().msg("command.login.success"));
+            case BINDING_REQUIRED -> {
+                // 密码正确但未绑定：放行本连接的 /bind，并提示需要绑定的渠道
+                var session = sessionOf(player);
+                if (session != null && result.account() != null) {
+                    session.allowPreLoginBinding(result.account().id());
+                }
+                player.sendMessage(plugin.lang().msg("command.login.binding-required"));
+                sendBindingRequirement(player);
+            }
             case WRONG_PASSWORD -> player.sendMessage(plugin.lang().msg("command.login.wrong-password"));
             case LOCKED -> player.sendMessage(plugin.lang().msg("command.login.locked"));
             case RATE_LIMITED -> player.sendMessage(plugin.lang().msg("command.login.rate-limited"));
@@ -49,6 +58,6 @@ public final class LoginCommand extends PlayerCommandSupport {
 
     @Override
     public boolean hasPermission(Invocation invocation) {
-        return invocation.source() instanceof Player;
+        return availableWhenUnauthenticated(invocation);
     }
 }

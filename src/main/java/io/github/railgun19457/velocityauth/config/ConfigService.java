@@ -1,7 +1,8 @@
 package io.github.railgun19457.velocityauth.config;
 
 import io.github.railgun19457.velocityauth.config.VelocityAuthConfig.Domain;
-import io.github.railgun19457.velocityauth.config.VelocityAuthConfig.Registration;
+import io.github.railgun19457.velocityauth.storage.model.BindingType;
+import io.github.railgun19457.velocityauth.util.ReleasedResource;
 import org.slf4j.Logger;
 import org.yaml.snakeyaml.LoaderOptions;
 import org.yaml.snakeyaml.Yaml;
@@ -60,26 +61,23 @@ public final class ConfigService {
         return warnings;
     }
 
-    /** 首次启动释放默认模板；返回是否新建。 */
-    public boolean releaseDefaultIfMissing() throws IOException {
-        if (Files.exists(configFile)) {
-            return false;
-        }
-        Files.createDirectories(dataDirectory);
-        try (InputStream in = resourceAnchor.getResourceAsStream(DEFAULT_RESOURCE)) {
-            if (in == null) {
-                throw new IOException("jar 内缺少默认配置模板 " + DEFAULT_RESOURCE);
+    /** 首次启动释放默认模板，并在内置版本更新时释放/升级；返回是否新建。 */
+    public boolean releaseDefaultIfMissing() {
+        ReleasedResource.Outcome outcome = ReleasedResource.release(
+                resourceAnchor, DEFAULT_RESOURCE, configFile, false, logger);
+        switch (outcome) {
+            case CREATED -> logger.info("[VelocityAuth] 已释放默认配置到 {}", configFile);
+            case NEW_AVAILABLE -> logger.warn("[VelocityAuth] 内置配置模板已更新，新模板已写出到 {}.new，"
+                    + "请自行比对合并（不会自动覆盖你的配置，避免冲掉 SMTP 授权码等凭据）", configFile);
+            default -> {
             }
-            Files.copy(in, configFile);
         }
-        return true;
+        return outcome == ReleasedResource.Outcome.CREATED;
     }
 
     /** 加载（或重载）配置，失败时抛出 {@link ConfigException} 并保留旧配置。 */
     public VelocityAuthConfig load() throws IOException {
-        if (!Files.exists(configFile)) {
-            releaseDefaultIfMissing();
-        }
+        releaseDefaultIfMissing();
         Map<String, Object> root = readYaml(configFile);
         VelocityAuthConfig parsed = VelocityAuthConfig.from(ConfigNode.root(root));
         List<String> collected = validate(parsed);
@@ -123,11 +121,18 @@ public final class ConfigService {
             out.add("servers.login 与 servers.default 相同（" + cfg.servers().login()
                     + "），未认证玩家与已认证玩家将进入同一服务器，隔离将失效");
         }
-        if (cfg.registration().gate() == Registration.Gate.EMAIL && !cfg.binding().email().enabled()) {
-            out.add("registration.gate=email 但 binding.email.enabled=false，邮箱验证将不可用");
-        }
-        if (cfg.registration().gate() == Registration.Gate.QQ && !cfg.qqbot().enabled()) {
-            out.add("registration.gate=qq 但 qqbot.enabled=false，QQ 验证将不可用");
+        for (BindingType type : cfg.registration().requireBinding()) {
+            if (type == BindingType.EMAIL) {
+                if (!cfg.binding().email().enabled()) {
+                    out.add("registration.require-binding 含 email，但 binding.email.enabled=false，邮箱绑定将不可用");
+                }
+                if (!cfg.smtp().enabled()) {
+                    out.add("registration.require-binding 含 email，但 smtp.enabled=false，验证码邮件将无法发送");
+                }
+            }
+            if (type == BindingType.QQ && !cfg.qqbot().enabled()) {
+                out.add("registration.require-binding 含 qq，但 qqbot.enabled=false，QQ 绑定将不可用");
+            }
         }
         if (cfg.smtp().enabled() && cfg.smtp().username().isBlank()) {
             out.add("smtp.enabled=true 但 smtp.username 为空，邮件将无法发送");

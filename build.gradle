@@ -94,8 +94,11 @@ shadowJar {
     relocate 'at.favre.lib',        'io.github.railgun19457.velocityauth.lib.bcrypt'
     relocate 'com.zaxxer.hikari',   'io.github.railgun19457.velocityauth.lib.hikari'
     relocate 'org.java_websocket',  'io.github.railgun19457.velocityauth.lib.ws'
-    relocate 'org.eclipse.angus',   'io.github.railgun19457.velocityauth.lib.mail'
-    relocate 'jakarta.mail',        'io.github.railgun19457.velocityauth.lib.mailapi'
+    // 邮件库（jakarta.mail / angus-mail）刻意**不** relocate：
+    // 它们依赖 META-INF/mailcap 里的内容处理器类名，而资源文件内容不会被 relocate 改写，
+    // 一旦改写包名，multipart 邮件（HTML + 纯文本）就会报
+    // "no object DCH for MIME type multipart/alternative"。
+    // Velocity 为每个插件使用独立 ClassLoader，本就不需要靠 relocate 避免冲突。
 }
 
 build.dependsOn shadowJar

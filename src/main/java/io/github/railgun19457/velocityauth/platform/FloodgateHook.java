@@ -65,19 +65,6 @@ public class FloodgateHook {
         }
     }
 
-    /** 基岩端 XUID（用于展示；身份标识统一用 Floodgate UUID）。 */
-    public Optional<String> xuid(UUID uuid) {
-        if (!available || uuid == null) {
-            return Optional.empty();
-        }
-        try {
-            var player = org.geysermc.floodgate.api.FloodgateApi.getInstance().getPlayer(uuid);
-            return player == null ? Optional.empty() : Optional.ofNullable(player.getXuid());
-        } catch (Throwable t) {
-            return Optional.empty();
-        }
-    }
-
     /**
      * Floodgate 的「稳定 ID」：由 XUID 派生（{@code FloodgatePlayer#getJavaUniqueId()}），
      * **与玩家是否已关联账号无关**。

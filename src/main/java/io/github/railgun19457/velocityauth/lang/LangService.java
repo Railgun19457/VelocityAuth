@@ -2,6 +2,7 @@ package io.github.railgun19457.velocityauth.lang;
 
 import io.github.railgun19457.velocityauth.config.ConfigException;
 import io.github.railgun19457.velocityauth.util.MessageRenderer;
+import io.github.railgun19457.velocityauth.util.ReleasedResource;
 import net.kyori.adventure.text.Component;
 import org.slf4j.Logger;
 import org.yaml.snakeyaml.LoaderOptions;
@@ -15,7 +16,9 @@ import java.io.Reader;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 
 /**
@@ -26,6 +29,9 @@ import java.util.Map;
 public final class LangService {
 
     private static final String FALLBACK = "en_us";
+
+    /** 随插件发布的内置语言文件（会释放到数据目录供用户修改）。 */
+    private static final List<String> SHIPPED = List.of("zh_cn", "en_us");
 
     private final String code;
     private final Map<String, String> messages;
@@ -40,14 +46,14 @@ public final class LangService {
     public static LangService load(String code, Class<?> resourceAnchor, Path dataDirectory, Logger logger)
             throws IOException {
         String requested = code == null || code.isBlank() ? FALLBACK : code.trim();
-        Map<String, String> messages = tryLoad(requested, resourceAnchor, dataDirectory);
+        Map<String, String> messages = tryLoad(requested, resourceAnchor, dataDirectory, logger);
         String effective = requested;
         if (messages == null) {
             if (logger != null) {
                 logger.warn("[VelocityAuth] 语言文件 {} 不存在，回退到 {}", requested, FALLBACK);
             }
             effective = FALLBACK;
-            messages = tryLoad(FALLBACK, resourceAnchor, dataDirectory);
+            messages = tryLoad(FALLBACK, resourceAnchor, dataDirectory, logger);
             if (messages == null) {
                 throw new ConfigException("language", "找不到语言文件：" + requested + " / " + FALLBACK);
             }
@@ -56,15 +62,65 @@ public final class LangService {
         return new LangService(effective, Map.copyOf(messages), prefix);
     }
 
-    private static Map<String, String> tryLoad(String code, Class<?> anchor, Path dataDirectory) throws IOException {
-        Path override = dataDirectory == null ? null : dataDirectory.resolve("lang").resolve(code + ".yml");
-        if (override != null && Files.isRegularFile(override)) {
-            try (Reader reader = Files.newBufferedReader(override, StandardCharsets.UTF_8)) {
-                return flatten(reader);
+    /**
+     * 把内置语言文件释放到数据目录 {@code lang/}，并按版本升级。
+     * <p>
+     * 用户改过的文件不会丢：版本落后时会先备份成 {@code <名>.bak-<时间>} 再覆盖；
+     * 若用户文件没有版本标记且内容已被改动，则只写出 {@code <名>.new} 供比对。
+     */
+    public static void releaseShipped(Class<?> resourceAnchor, Path dataDirectory, Logger logger) {
+        if (dataDirectory == null) {
+            return;
+        }
+        Path dir = dataDirectory.resolve("lang");
+        for (String code : SHIPPED) {
+            ReleasedResource.Outcome outcome = ReleasedResource.release(
+                    resourceAnchor, "/lang/" + code + ".yml", dir.resolve(code + ".yml"), true, logger);
+            if (logger == null) {
+                continue;
+            }
+            switch (outcome) {
+                case CREATED -> logger.info("[VelocityAuth] 已释放语言文件 lang/{}.yml", code);
+                case UPGRADED -> logger.info("[VelocityAuth] 语言文件 lang/{}.yml 已升级到内置版本", code);
+                case NEW_AVAILABLE -> logger.warn("[VelocityAuth] 语言文件 lang/{}.yml 与内置版本不一致"
+                        + "（你改动过且无版本标记），新版本已写出到 lang/{}.yml.new，请自行比对", code, code);
+                default -> {
+                }
             }
         }
-        String resource = "/lang/" + code + ".yml";
-        try (InputStream in = anchor.getResourceAsStream(resource)) {
+    }
+
+    /**
+     * 优先读数据目录覆盖文件；存在时用 jar 内置文案补齐它缺少的键
+     * （这样升级新增的文案不会显示成原始 key）。
+     */
+    private static Map<String, String> tryLoad(String code, Class<?> anchor, Path dataDirectory, Logger logger)
+            throws IOException {
+        Map<String, String> defaults = loadResource(code, anchor);
+        Path override = dataDirectory == null ? null : dataDirectory.resolve("lang").resolve(code + ".yml");
+        if (override != null && Files.isRegularFile(override)) {
+            Map<String, String> custom;
+            try (Reader reader = Files.newBufferedReader(override, StandardCharsets.UTF_8)) {
+                custom = flatten(reader);
+            }
+            if (defaults != null) {
+                int filled = 0;
+                for (Map.Entry<String, String> entry : defaults.entrySet()) {
+                    if (custom.putIfAbsent(entry.getKey(), entry.getValue()) == null) {
+                        filled++;
+                    }
+                }
+                if (filled > 0 && logger != null) {
+                    logger.info("[VelocityAuth] 语言文件 {} 缺少 {} 个键，已用内置文案补齐", code, filled);
+                }
+            }
+            return custom;
+        }
+        return defaults;
+    }
+
+    private static Map<String, String> loadResource(String code, Class<?> anchor) throws IOException {
+        try (InputStream in = anchor.getResourceAsStream("/lang/" + code + ".yml")) {
             if (in == null) {
                 return null;
             }

@@ -23,13 +23,15 @@ public final class BindingService {
 
     private final Supplier<VelocityAuthConfig> config;
     private final StorageService storage;
+    private final BindingIndex bindingIndex;
     private final AsyncExecutor async;
     private final PluginLogger log;
 
-    public BindingService(Supplier<VelocityAuthConfig> config, StorageService storage,
+    public BindingService(Supplier<VelocityAuthConfig> config, StorageService storage, BindingIndex bindingIndex,
                           AsyncExecutor async, PluginLogger log) {
         this.config = config;
         this.storage = storage;
+        this.bindingIndex = bindingIndex;
         this.async = async;
         this.log = log;
     }
@@ -72,6 +74,7 @@ public final class BindingService {
                 }
                 long now = AuthService.nowSeconds();
                 storage.bindings().insert(account.id(), BindingType.EMAIL, email, now, now);
+                bindingIndex.put(account.id(), BindingType.EMAIL);
                 storage.audit().log(now, account.id(), AuditEntry.BIND, ip, "type=email");
                 log.info("账号 {} 绑定邮箱（域名 {}）", account.name(), EmailRules.domainOf(email));
                 return AuthOutcomes.Bind.success(email);
@@ -101,6 +104,7 @@ public final class BindingService {
                 }
                 long now = AuthService.nowSeconds();
                 storage.bindings().insert(account.id(), BindingType.QQ, qq, now, now);
+                bindingIndex.put(account.id(), BindingType.QQ);
                 storage.audit().log(now, account.id(), AuditEntry.BIND, ip, "type=qq");
                 log.info("账号 {} 绑定 QQ {}", account.name(), qq);
                 return AuthOutcomes.Bind.success(qq);
@@ -121,6 +125,7 @@ public final class BindingService {
                 }
                 long now = AuthService.nowSeconds();
                 storage.bindings().delete(account.id(), type);
+                bindingIndex.remove(account.id(), type);
                 storage.audit().log(now, account.id(), AuditEntry.UNBIND, ip, "type=" + type.dbValue());
                 log.info("账号 {} 解绑 {}", account.name(), type.dbValue());
                 return AuthOutcomes.Bind.success(null);

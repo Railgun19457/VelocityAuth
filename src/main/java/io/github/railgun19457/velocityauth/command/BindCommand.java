@@ -6,6 +6,7 @@ import io.github.railgun19457.velocityauth.auth.AuthOutcomes;
 import io.github.railgun19457.velocityauth.auth.AuthSession;
 import io.github.railgun19457.velocityauth.auth.AuthSessionRegistry;
 import io.github.railgun19457.velocityauth.auth.EmailRules;
+import io.github.railgun19457.velocityauth.auth.IdentityResolver;
 import io.github.railgun19457.velocityauth.storage.model.Account;
 import io.github.railgun19457.velocityauth.storage.model.BindingType;
 import io.github.railgun19457.velocityauth.verify.VerificationChannel;
@@ -30,13 +31,14 @@ public final class BindCommand extends PlayerCommandSupport {
     @Override
     public void execute(Invocation invocation) {
         Player player = requirePlayer(invocation);
-        if (player == null || !requireAuthenticated(player)) {
+        if (player == null) {
             return;
         }
         AuthSession session = sessionOf(player);
-        Account account = session == null ? null : session.account();
+        Account account = resolveAccount(player, session);
         if (account == null) {
-            player.sendMessage(plugin.lang().msg("generic.not-authenticated"));
+            // 既未登录，也不属于「注册后待绑定 / 密码已通过」的放行场景
+            player.sendMessage(plugin.lang().msg("command.bind.not-authenticated"));
             return;
         }
         String[] args = invocation.arguments();
@@ -56,9 +58,33 @@ public final class BindCommand extends PlayerCommandSupport {
         }
     }
 
+    /**
+     * 确定本次 {@code /bind} 作用在哪个账号上。
+     * <p>
+     * 已认证玩家直接用自己的账号；未认证玩家仅当会话放行了该账号（刚注册 / 密码已通过但被绑定要求拦下）
+     * 时才允许，否则返回 null。
+     */
+    private Account resolveAccount(Player player, AuthSession session) {
+        if (session == null) {
+            return null;
+        }
+        if (session.authenticated()) {
+            return session.account();
+        }
+        IdentityResolver.Resolved identity = identityOf(player);
+        Account account = plugin.authService().cache()
+                .byIdentity(identity.kind(), identity.identifier())
+                .orElse(null);
+        if (account == null || account.locked() || !session.preLoginBindingAllowed(account.id())) {
+            return null;
+        }
+        return account;
+    }
+
     private void bindEmail(Player player, Account account, String[] args) {
         if (args.length < 2) {
             player.sendMessage(plugin.lang().msg("command.bind.email-usage"));
+            player.sendMessage(VerificationPrompts.emailDomainHint(plugin));
             return;
         }
         if (!plugin.config().binding().email().enabled()) {
@@ -70,16 +96,20 @@ public final class BindCommand extends PlayerCommandSupport {
                 plugin.config().binding().email().domain());
         if (verdict == EmailRules.DomainVerdict.INVALID_EMAIL) {
             player.sendMessage(plugin.lang().msg("command.bind.email-invalid"));
+            player.sendMessage(VerificationPrompts.emailDomainHint(plugin));
             return;
         }
         if (verdict == EmailRules.DomainVerdict.DOMAIN_NOT_ALLOWED) {
             player.sendMessage(plugin.lang().msg("command.bind.domain-not-allowed"));
+            player.sendMessage(VerificationPrompts.emailDomainHint(plugin));
             return;
         }
         if (plugin.bindings().hasBinding(account.id(), BindingType.EMAIL)) {
             player.sendMessage(plugin.lang().msg("command.bind.already-bound"));
             return;
         }
+        // 玩家「选择绑定邮箱」后，先告知支持的邮箱类型，再发码
+        player.sendMessage(VerificationPrompts.emailDomainHint(plugin));
         String ip = ipOf(player);
         VerificationService.Start start = plugin.verifications().start(VerificationRequest
                 .builder(VerificationPurpose.BIND_EMAIL, VerificationChannel.EMAIL, player.getUniqueId())
@@ -88,7 +118,8 @@ public final class BindCommand extends PlayerCommandSupport {
                 .ip(ip)
                 .target(email)
                 .data(Map.of("account_id", Long.toString(account.id())))
-                .onDispatch(VerificationPrompts.dispatchHandler(plugin, player, email))
+                .onDispatch(VerificationPrompts.dispatchHandler(plugin, player, email,
+                        VerificationPurpose.BIND_EMAIL))
                 .build());
         if (!start.accepted()) {
             return;
@@ -99,7 +130,7 @@ public final class BindCommand extends PlayerCommandSupport {
                 return;
             }
             plugin.bindings().bindEmail(account, email, ip)
-                    .thenAccept(outcome -> player.sendMessage(bindMessage(outcome)));
+                    .thenAccept(outcome -> afterBind(player, account, outcome));
         });
     }
 
@@ -119,12 +150,14 @@ public final class BindCommand extends PlayerCommandSupport {
                 .connectionName(identityOf(player).identifier())
                 .ip(ip)
                 .data(Map.of("account_id", Long.toString(account.id())))
-                .onDispatch(VerificationPrompts.dispatchHandler(plugin, player, null))
+                .onDispatch(VerificationPrompts.dispatchHandler(plugin, player, null,
+                        VerificationPurpose.BIND_QQ))
                 .build());
         if (!start.accepted()) {
             return;
         }
-        VerificationPrompts.sendQqInstruction(plugin, player, start.session().code());
+        VerificationPrompts.sendQqInstruction(plugin, player, start.session().code(),
+                VerificationPurpose.BIND_QQ);
         start.completion().thenAccept(result -> {
             if (result.status() != VerificationResult.Status.COMPLETED) {
                 player.sendMessage(verificationFailureMessage(result.status()));
@@ -132,7 +165,30 @@ public final class BindCommand extends PlayerCommandSupport {
             }
             String qq = result.session().resolvedValue();
             plugin.bindings().bindQq(account, qq, ip)
-                    .thenAccept(outcome -> player.sendMessage(bindMessage(outcome)));
+                    .thenAccept(outcome -> afterBind(player, account, outcome));
+        });
+    }
+
+    /**
+     * 绑定收尾：若这次绑定让账号满足了「注册后必须绑定」的要求，则激活账号并自动登录；
+     * 否则只提示绑定结果，并在仍缺渠道时继续提示。
+     */
+    private void afterBind(Player player, Account account, AuthOutcomes.Bind outcome) {
+        if (!outcome.ok()) {
+            player.sendMessage(bindMessage(outcome));
+            return;
+        }
+        plugin.authService().activateIfBindingSatisfied(account.id()).thenAccept(activated -> {
+            if (Boolean.TRUE.equals(activated)) {
+                finishAuthAndReconnect(player, identityOf(player), ipOf(player), account.id(),
+                        plugin.lang().msg("command.bind.activated"));
+                return;
+            }
+            player.sendMessage(bindMessage(outcome));
+            if (!plugin.config().registration().requireBinding().isEmpty()
+                    && !plugin.authService().bindingSatisfied(account)) {
+                sendBindingRequirement(player);
+            }
         });
     }
 
@@ -159,6 +215,12 @@ public final class BindCommand extends PlayerCommandSupport {
             case REPLACED -> plugin.lang().msg("verification.cancelled");
             default -> plugin.lang().msg("generic.internal-error");
         };
+    }
+
+    @Override
+    public java.util.List<String> suggest(Invocation invocation) {
+        // /bind <email|qq> [值]
+        return suggestBindingChannel(invocation, 0);
     }
 
     @Override

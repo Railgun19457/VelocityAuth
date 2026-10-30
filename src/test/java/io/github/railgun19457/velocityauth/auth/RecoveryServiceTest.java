@@ -10,6 +10,7 @@ import io.github.railgun19457.velocityauth.storage.model.AccountStatus;
 import io.github.railgun19457.velocityauth.storage.model.BindingType;
 import io.github.railgun19457.velocityauth.util.AsyncExecutor;
 import io.github.railgun19457.velocityauth.util.PluginLogger;
+import io.github.railgun19457.velocityauth.mail.EmailTemplateService;
 import io.github.railgun19457.velocityauth.verify.QqVerificationGateway;
 import io.github.railgun19457.velocityauth.verify.VerificationService;
 import org.junit.jupiter.api.AfterEach;
@@ -65,7 +66,7 @@ class RecoveryServiceTest {
             }
 
             @Override
-            public CompletableFuture<Boolean> send(String to, String subject, String body) {
+            public CompletableFuture<Boolean> send(String to, String subject, String text, String html) {
                 sentEmails.add(to);
                 return CompletableFuture.completedFuture(true);
             }
@@ -84,7 +85,8 @@ class RecoveryServiceTest {
             public void cancel(String code) {
             }
         };
-        verifications = new VerificationService(() -> config, () -> lang, () -> "Test", mail, gateway,
+        verifications = new VerificationService(() -> config, () -> lang, () -> "Test", mail,
+                new EmailTemplateService(tempDir, VelocityAuthPlugin.class, NOPLogger.NOP_LOGGER), gateway,
                 new RateLimiter(), (task, delay) -> scheduled.add(task), Runnable::run, log);
         recovery = new RecoveryService(() -> config, storage, verifications, async, log);
 

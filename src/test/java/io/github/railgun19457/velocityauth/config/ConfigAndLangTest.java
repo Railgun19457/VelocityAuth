@@ -23,7 +23,8 @@ class ConfigAndLangTest {
         assertEquals(VelocityAuthConfig.Database.Type.SQLITE, config.database().type());
         assertEquals("lobby", config.servers().login());
         assertEquals("main", config.servers().defaultServer());
-        assertEquals(VelocityAuthConfig.Registration.Gate.NONE, config.registration().gate());
+        assertEquals(java.util.List.of(), config.registration().requireBinding());
+        assertEquals(30, config.registration().unboundTtlMinutes());
         assertTrue(config.auth().accountName().pattern().matcher("abc_123").matches());
     }
 

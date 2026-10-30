@@ -1,5 +1,8 @@
 package io.github.railgun19457.velocityauth.config;
 
+import io.github.railgun19457.velocityauth.storage.model.BindingType;
+
+import java.util.ArrayList;
 import java.util.List;
 import java.util.regex.Pattern;
 import java.util.regex.PatternSyntaxException;
@@ -44,7 +47,7 @@ public record VelocityAuthConfig(
                        Bedrock bedrock) {
     }
 
-    public record AccountName(int minLength, int maxLength, Pattern pattern, boolean caseInsensitive) {
+    public record AccountName(int minLength, int maxLength, Pattern pattern) {
     }
 
     public record Password(int minLength, int maxLength) {
@@ -70,8 +73,18 @@ public record VelocityAuthConfig(
 
     // ---------------------------------------------------------------- registration / binding
 
-    public record Registration(Gate gate) {
-        public enum Gate { NONE, EMAIL, QQ }
+    /**
+     * 注册行为与「注册后必须绑定」的要求。
+     *
+     * @param requireBinding     注册后必须完成的绑定渠道，玩家**任选其一**即可；
+     *                           空列表表示无需绑定（注册完即可登录）。
+     * @param unboundTtlMinutes  未绑定账号的存活时间（分钟），超时自动清除；0 表示不自动清除。
+     */
+    public record Registration(List<BindingType> requireBinding, int unboundTtlMinutes) {
+
+        public boolean bindingRequired() {
+            return !requireBinding.isEmpty();
+        }
     }
 
     public record Binding(EmailBinding email, QqBinding qq) {
@@ -104,8 +117,8 @@ public record VelocityAuthConfig(
 
     // ---------------------------------------------------------------- qq bot
 
-    public record QqBot(boolean enabled, String listen, int port, String groupId, boolean requireGroupMember,
-                        Pairing pairing) {
+    public record QqBot(boolean enabled, String listen, int port, String groupId, String privateNumber,
+                        boolean requireGroupMember, Pairing pairing) {
     }
 
     public record Pairing(int ttlSeconds, int maxAttempts, String bootstrapCode) {
@@ -157,8 +170,7 @@ public record VelocityAuthConfig(
         AccountName accountName = new AccountName(
                 nameNode.intValue("min-length", 3),
                 nameNode.intValue("max-length", 16),
-                namePattern,
-                nameNode.bool("case-insensitive", true));
+                namePattern);
         if (accountName.minLength() < 1 || accountName.minLength() > accountName.maxLength()) {
             throw new ConfigException("auth.account-name",
                     "min-length 必须 >= 1 且不大于 max-length（当前 " + accountName.minLength()
@@ -191,20 +203,37 @@ public record VelocityAuthConfig(
         Premium premium = new Premium(
                 premiumNode.bool("enabled", true),
                 premiumNode.bool("keep-real-uuid", true),
-                premiumNode.bool("require-password", false),
+                premiumNode.bool("require-password", true),
                 conflict.equals("first-come") ? Premium.NameConflict.FIRST_COME : Premium.NameConflict.PREMIUM_PRIORITY);
 
         Auth auth = new Auth(accountName, password, bcryptCost, session, premium,
                 new Bedrock(authNode.section("bedrock").bool("auto-link", true)));
 
         ConfigNode regNode = root.section("registration");
-        String gate = regNode.enumValue("gate", "none", "none", "email", "qq");
-        Registration registration = new Registration(
-                switch (gate) {
-                    case "email" -> Registration.Gate.EMAIL;
-                    case "qq" -> Registration.Gate.QQ;
-                    default -> Registration.Gate.NONE;
-                });
+        List<BindingType> requireBinding = new ArrayList<>();
+        if (regNode.has("require-binding")) {
+            for (String raw : regNode.stringListOrScalar("require-binding", List.of())) {
+                BindingType type = BindingType.fromName(raw);
+                if (type == null) {
+                    throw new ConfigException("registration.require-binding",
+                            "取值 \"" + raw + "\" 不合法，可选值：email | qq");
+                }
+                if (!requireBinding.contains(type)) {
+                    requireBinding.add(type);
+                }
+            }
+        } else if (regNode.has("gate")) {
+            // 兼容旧配置：registration.gate = none | email | qq
+            String legacy = regNode.enumValue("gate", "none", "none", "email", "qq");
+            if (!legacy.equals("none")) {
+                requireBinding.add(BindingType.fromName(legacy));
+            }
+        }
+        int unboundTtlMinutes = regNode.intValue("unbound-ttl-minutes", 30);
+        if (unboundTtlMinutes < 0) {
+            throw new ConfigException("registration.unbound-ttl-minutes", "不能为负数（0 表示不自动清除）");
+        }
+        Registration registration = new Registration(List.copyOf(requireBinding), unboundTtlMinutes);
 
         ConfigNode bindNode = root.section("binding");
         ConfigNode emailNode = bindNode.section("email");
@@ -262,6 +291,7 @@ public record VelocityAuthConfig(
                 qqbotNode.string("listen", "0.0.0.0"),
                 qqbotNode.intValue("port", 8765),
                 qqbotNode.string("group-id", ""),
+                qqbotNode.string("private-number", ""),
                 qqbotNode.bool("require-group-member", true),
                 new Pairing(
                         pairingNode.intValue("ttl-seconds", 600),

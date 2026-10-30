@@ -3,6 +3,7 @@ package io.github.railgun19457.velocityauth.verify;
 import io.github.railgun19457.velocityauth.auth.RateLimiter;
 import io.github.railgun19457.velocityauth.config.VelocityAuthConfig;
 import io.github.railgun19457.velocityauth.lang.LangService;
+import io.github.railgun19457.velocityauth.mail.EmailTemplateService;
 import io.github.railgun19457.velocityauth.mail.MailSender;
 import io.github.railgun19457.velocityauth.util.PluginLogger;
 
@@ -34,6 +35,7 @@ public final class VerificationService {
     private final Supplier<LangService> lang;
     private final Supplier<String> serverName;
     private final MailSender smtpSender;
+    private final EmailTemplateService emailTemplate;
     private final QqVerificationGateway qqGateway;
     private final RateLimiter rateLimiter;
     private final Timer timer;
@@ -50,6 +52,7 @@ public final class VerificationService {
                                Supplier<LangService> lang,
                                Supplier<String> serverName,
                                MailSender smtpSender,
+                               EmailTemplateService emailTemplate,
                                QqVerificationGateway qqGateway,
                                RateLimiter rateLimiter,
                                Timer timer,
@@ -59,6 +62,7 @@ public final class VerificationService {
         this.lang = lang;
         this.serverName = serverName;
         this.smtpSender = smtpSender;
+        this.emailTemplate = emailTemplate;
         this.qqGateway = qqGateway;
         this.rateLimiter = rateLimiter;
         this.timer = timer;
@@ -133,10 +137,12 @@ public final class VerificationService {
                           VelocityAuthConfig.Verification rules) {
         long minutes = Math.max(1, rules.ttlSeconds() / 60);
         if (session.channel() == VerificationChannel.EMAIL) {
-            String subject = lang.get().render("verification.email-subject", "server", serverName.get());
-            String body = lang.get().render("verification.email-body",
-                    "code", session.code(), "minutes", minutes, "server", serverName.get());
-            smtpSender.send(session.target(), subject, body).thenAccept(ok -> {
+            // {action} 取语言文件里的操作名称，让邮件能区分注册 / 绑定 / 找回等场景
+            String action = lang.get().rawText(session.purpose().actionLangKey());
+            String subject = emailTemplate.subject(serverName.get(), action);
+            String text = emailTemplate.text(session.code(), minutes, serverName.get(), action);
+            String html = emailTemplate.html(session.code(), minutes, serverName.get(), action);
+            smtpSender.send(session.target(), subject, text, html).thenAccept(ok -> {
                 if (Boolean.TRUE.equals(ok)) {
                     request.onDispatch().accept(VerificationDispatch.EMAIL_SENT);
                 } else {
@@ -230,6 +236,12 @@ public final class VerificationService {
     public boolean onQqMatched(String code, String qq, String groupId, boolean groupMember) {
         VerificationSession session = byCode.get(code);
         if (session == null || session.finished() || session.channel() != VerificationChannel.QQ) {
+            return false;
+        }
+        // 只接受来自配置群的命中，避免被已配对 bot 的异常上报绕过"证明持有该 QQ"
+        String expectedGroup = config.get().qqbot().groupId();
+        if (expectedGroup != null && !expectedGroup.isBlank() && !expectedGroup.equals(groupId)) {
+            log.warn("QQ 验证被拒绝：上报群号 {} 与配置 {} 不一致", groupId, expectedGroup);
             return false;
         }
         if (config.get().qqbot().requireGroupMember() && !groupMember) {

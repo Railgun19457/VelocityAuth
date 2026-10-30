@@ -10,7 +10,9 @@ import jakarta.mail.Session;
 import jakarta.mail.Transport;
 import jakarta.mail.internet.AddressException;
 import jakarta.mail.internet.InternetAddress;
+import jakarta.mail.internet.MimeBodyPart;
 import jakarta.mail.internet.MimeMessage;
+import jakarta.mail.internet.MimeMultipart;
 
 import java.nio.charset.StandardCharsets;
 import java.util.Properties;
@@ -41,20 +43,22 @@ public class SmtpSender implements MailSender {
     }
 
     @Override
-    public CompletableFuture<Boolean> send(String to, String subject, String body) {
+    public CompletableFuture<Boolean> send(String to, String subject, String text, String html) {
         if (!available()) {
             return CompletableFuture.completedFuture(false);
         }
-        return async.supply(() -> sendBlocking(to, subject, body));
+        return async.supply(() -> sendBlocking(to, subject, text, html));
     }
 
-    private boolean sendBlocking(String to, String subject, String body) {
+    private boolean sendBlocking(String to, String subject, String text, String html) {
         VelocityAuthConfig.Smtp smtp = config.get().smtp();
         try {
             Properties props = new Properties();
             props.put("mail.smtp.host", smtp.host());
             props.put("mail.smtp.port", Integer.toString(smtp.port()));
             props.put("mail.smtp.ssl.enable", Boolean.toString(smtp.ssl()));
+            // ssl=false 时尝试 STARTTLS（常见于 587 端口），避免明文提交凭据
+            props.put("mail.smtp.starttls.enable", Boolean.toString(!smtp.ssl()));
             props.put("mail.smtp.auth", Boolean.toString(!smtp.username().isBlank()));
             int timeout = Math.max(1, smtp.timeoutSeconds()) * 1000;
             props.put("mail.smtp.connectiontimeout", Integer.toString(timeout));
@@ -76,14 +80,27 @@ public class SmtpSender implements MailSender {
             message.setFrom(fromAddresses[0]);
             message.setRecipients(Message.RecipientType.TO, InternetAddress.parse(to, false));
             message.setSubject(subject, StandardCharsets.UTF_8.name());
-            message.setText(body, StandardCharsets.UTF_8.name());
-            message.setHeader("Content-Transfer-Encoding", "base64");
+            if (html == null || html.isBlank()) {
+                message.setText(text == null ? "" : text, StandardCharsets.UTF_8.name());
+            } else {
+                // multipart/alternative：优先显示 HTML，纯文本作为兜底
+                MimeBodyPart textPart = new MimeBodyPart();
+                textPart.setText(text == null ? "" : text, StandardCharsets.UTF_8.name());
+                MimeBodyPart htmlPart = new MimeBodyPart();
+                htmlPart.setContent(html, "text/html; charset=UTF-8");
+                MimeMultipart multipart = new MimeMultipart("alternative");
+                multipart.addBodyPart(textPart);
+                multipart.addBodyPart(htmlPart);
+                message.setContent(multipart);
+            }
 
             Transport.send(message);
             return true;
         } catch (Exception e) {
-            // 不记录正文（可能含验证码），只记录异常类型与收件域名
-            log.warn("发送邮件失败（收件人域名 {}）：{}", domainOf(to), e.getClass().getSimpleName());
+            // 不记录正文（可能含验证码），只记录异常类型/消息与收件域名
+            log.warn("发送邮件失败（收件人域名 {}）：{} - {}",
+                    domainOf(to), e.getClass().getSimpleName(), e.getMessage());
+            log.debug("邮件发送异常详情", e);
             log.debug("邮件发送异常详情", e);
             return false;
         }

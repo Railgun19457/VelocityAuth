@@ -46,6 +46,17 @@ class AuthCoreTest {
     }
 
     @Test
+    void bcryptByteLimitIsEnforced() {
+        // bcrypt 只用前 72 字节，超过必须拒绝（否则超长密码会被静默截断）
+        assertTrue(PasswordHasher.withinByteLimit("a".repeat(72)));
+        assertFalse(PasswordHasher.withinByteLimit("a".repeat(73)));
+        // 24 个中文字符 = 72 字节（允许）；25 个 = 75 字节（拒绝），而字符数都远小于 64
+        assertTrue(PasswordHasher.withinByteLimit("密".repeat(24)));
+        assertFalse(PasswordHasher.withinByteLimit("密".repeat(25)));
+        assertFalse(PasswordHasher.withinByteLimit(null));
+    }
+
+    @Test
     void pendingBindingIsConsumedOnceAndScopedByIp() {
         PendingBindingStore store = new PendingBindingStore();
         store.put("test2", "1.2.3.4", 42L);

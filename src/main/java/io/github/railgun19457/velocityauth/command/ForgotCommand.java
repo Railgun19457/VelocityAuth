@@ -6,6 +6,7 @@ import io.github.railgun19457.velocityauth.auth.AuthSessionRegistry;
 import io.github.railgun19457.velocityauth.auth.RecoveryService;
 import io.github.railgun19457.velocityauth.storage.model.BindingType;
 import io.github.railgun19457.velocityauth.verify.VerificationChannel;
+import io.github.railgun19457.velocityauth.verify.VerificationPurpose;
 
 /**
  * {@code /forgot <账号>} / {@code /forgot <账号> <email|qq>}
@@ -31,7 +32,6 @@ public final class ForgotCommand extends PlayerCommandSupport {
         }
         String accountName = args[0];
         if (args.length < 2) {
-            player.sendMessage(plugin.lang().msg("command.forgot.request-received"));
             player.sendMessage(plugin.lang().msg("command.forgot.choose-channel",
                     "channels", "email | qq"));
             return;
@@ -44,10 +44,8 @@ public final class ForgotCommand extends PlayerCommandSupport {
         var identity = identityOf(player);
         String ip = ipOf(player);
 
-        player.sendMessage(plugin.lang().msg("command.forgot.request-received"));
-
         plugin.recovery().request(accountName, type, player.getUniqueId(), identity.identifier(), ip,
-                        VerificationPrompts.dispatchHandler(plugin, player, null))
+                        VerificationPrompts.dispatchHandler(plugin, player, null, VerificationPurpose.RECOVER))
                 .thenAccept(start -> handle(player, start))
                 .exceptionally(throwable -> {
                     plugin.log().error("找回密码命令异常", throwable);
@@ -61,7 +59,8 @@ public final class ForgotCommand extends PlayerCommandSupport {
             return;
         }
         if (start.session().channel() == VerificationChannel.QQ) {
-            VerificationPrompts.sendQqInstruction(plugin, player, start.session().code());
+            VerificationPrompts.sendQqInstruction(plugin, player, start.session().code(),
+                    VerificationPurpose.RECOVER);
         }
         start.completion().thenAccept(result -> {
             if (result.completed()) {
@@ -71,7 +70,13 @@ public final class ForgotCommand extends PlayerCommandSupport {
     }
 
     @Override
+    public java.util.List<String> suggest(Invocation invocation) {
+        // /forgot <账号> [email|qq]
+        return suggestBindingChannel(invocation, 1);
+    }
+
+    @Override
     public boolean hasPermission(Invocation invocation) {
-        return invocation.source() instanceof Player;
+        return availableWhenUnauthenticated(invocation);
     }
 }

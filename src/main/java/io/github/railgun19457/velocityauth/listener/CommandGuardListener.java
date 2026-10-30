@@ -18,11 +18,12 @@ public final class CommandGuardListener {
 
     /** 未认证玩家仍可执行的命令（认证相关 + 管理命令）。 */
     private static final Set<String> ALLOWED = Set.of(
-            "login", "l",
-            "register", "reg",
+            "login",
+            "register",
+            "bind",
             "forgot",
             "verify",
-            "resetpassword", "resetpw",
+            "resetpassword",
             "velocityauth", "vauth");
 
     private final VelocityAuthPlugin plugin;

@@ -20,15 +20,16 @@ public final class CommandRegistrar {
     }
 
     public void registerPlayerCommands() {
-        register("login", new LoginCommand(plugin, registry), "l");
-        register("register", new RegisterCommand(plugin, registry), "reg");
+        register("login", new LoginCommand(plugin, registry));
+        register("register", new RegisterCommand(plugin, registry));
         register("logout", new LogoutCommand(plugin, registry));
-        register("changepassword", new ChangePasswordCommand(plugin, registry), "changepw", "cp");
+        register("changepassword", new ChangePasswordCommand(plugin, registry));
         register("verify", new VerifyCommand(plugin, registry));
         register("bind", new BindCommand(plugin, registry));
         register("unbind", new UnbindCommand(plugin, registry));
         register("forgot", new ForgotCommand(plugin, registry));
-        register("resetpassword", new ResetPasswordCommand(plugin, registry), "resetpw");
+        register("resetpassword", new ResetPasswordCommand(plugin, registry));
+        register("deleteaccount", new DeleteAccountCommand(plugin, registry));
         register("velocityauth", new AdminCommand(plugin), "vauth");
     }
 

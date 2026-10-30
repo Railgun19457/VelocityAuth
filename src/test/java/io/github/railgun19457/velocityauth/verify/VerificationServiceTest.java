@@ -5,6 +5,7 @@ import io.github.railgun19457.velocityauth.auth.RateLimiter;
 import io.github.railgun19457.velocityauth.config.ConfigNode;
 import io.github.railgun19457.velocityauth.config.VelocityAuthConfig;
 import io.github.railgun19457.velocityauth.lang.LangService;
+import io.github.railgun19457.velocityauth.mail.EmailTemplateService;
 import io.github.railgun19457.velocityauth.mail.MailSender;
 import io.github.railgun19457.velocityauth.util.AsyncExecutor;
 import io.github.railgun19457.velocityauth.util.PluginLogger;
@@ -15,7 +16,6 @@ import org.junit.jupiter.api.Timeout;
 import org.slf4j.helpers.NOPLogger;
 
 import java.io.IOException;
-import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -33,6 +33,9 @@ class VerificationServiceTest {
     private AsyncExecutor async;
     private VerificationService service;
     private final List<Runnable> scheduledTasks = new ArrayList<>();
+
+    @org.junit.jupiter.api.io.TempDir
+    java.nio.file.Path tempDir;
     private final List<String> watched = new ArrayList<>();
     private final List<String> cancelled = new ArrayList<>();
     private final List<String> sentEmails = new ArrayList<>();
@@ -58,7 +61,7 @@ class VerificationServiceTest {
             }
 
             @Override
-            public CompletableFuture<Boolean> send(String to, String subject, String body) {
+            public CompletableFuture<Boolean> send(String to, String subject, String text, String html) {
                 sentEmails.add(to);
                 return CompletableFuture.completedFuture(true);
             }
@@ -81,7 +84,8 @@ class VerificationServiceTest {
             }
         };
 
-        service = new VerificationService(() -> config, () -> lang, () -> "TestServer", smtp, gateway,
+        service = new VerificationService(() -> config, () -> lang, () -> "TestServer", smtp,
+                new EmailTemplateService(tempDir, VelocityAuthPlugin.class, NOPLogger.NOP_LOGGER), gateway,
                 new RateLimiter(), (task, delay) -> scheduledTasks.add(task), Runnable::run, log);
     }
 
@@ -125,6 +129,16 @@ class VerificationServiceTest {
         VerificationService.Start start = start(VerificationChannel.QQ, VerificationPurpose.BIND_QQ);
         assertFalse(service.onQqMatched(start.session().code(), "10002", "123456", false));
         assertFalse(start.completion().isDone());
+    }
+
+    @Test
+    void qqMatchFromWrongGroupIsRejected() {
+        VerificationService.Start start = start(VerificationChannel.QQ, VerificationPurpose.BIND_QQ);
+        // 配置群为 123456；来自其它群的命中不得消费验证码
+        assertFalse(service.onQqMatched(start.session().code(), "10003", "999999", true));
+        assertFalse(start.completion().isDone());
+        assertTrue(service.onQqMatched(start.session().code(), "10003", "123456", true));
+        assertTrue(start.completion().join().completed());
     }
 
     @Test

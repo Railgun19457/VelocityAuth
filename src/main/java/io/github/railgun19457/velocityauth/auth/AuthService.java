@@ -6,16 +6,19 @@ import io.github.railgun19457.velocityauth.storage.StorageService;
 import io.github.railgun19457.velocityauth.storage.model.Account;
 import io.github.railgun19457.velocityauth.storage.model.AccountStatus;
 import io.github.railgun19457.velocityauth.storage.model.AuditEntry;
-import io.github.railgun19457.velocityauth.storage.model.Identity;
-import io.github.railgun19457.velocityauth.storage.model.IdentityKind;
+import io.github.railgun19457.velocityauth.storage.model.BindingType;
+import io.github.railgun19457.velocityauth.storage.model.Identity;import io.github.railgun19457.velocityauth.storage.model.IdentityKind;
 import io.github.railgun19457.velocityauth.storage.model.LoginSession;
 import io.github.railgun19457.velocityauth.util.AsyncExecutor;
 import io.github.railgun19457.velocityauth.util.PluginLogger;
 
 import java.time.Duration;
+import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Supplier;
 
 /**
@@ -33,13 +36,10 @@ public final class AuthService {
     private static final int REGISTER_PER_IP_PER_MINUTE = 5;
     private static final Duration ONE_MINUTE = Duration.ofMinutes(1);
 
-    /** 用于账号不存在时仍执行一次 bcrypt，尽量抹平响应时间差异（防枚举）。 */
-    private static final String DUMMY_HASH =
-            "$2a$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy";
-
     private final Supplier<VelocityAuthConfig> config;
     private final StorageService storage;
     private final AccountCache cache;
+    private final BindingIndex bindingIndex;
     private final PasswordHasher hasher;
     private final PendingBindingStore pendingBindings;
     private final RateLimiter rateLimiter;
@@ -47,9 +47,24 @@ public final class AuthService {
     private final AsyncExecutor async;
     private final PluginLogger log;
 
+    /**
+     * 账号不存在/被锁定时仍执行一次 bcrypt，尽量抹平响应时间差异（防枚举）。
+     * 使用与配置一致的 cost，避免用固定 cost 反而产生可区分的耗时。
+     */
+    private final String dummyHash;
+
+    /**
+     * 会话保持的内存索引：key = {@code accountId[|ip]}，value = 过期时间（unix 秒）。
+     * <p>
+     * {@code GameProfileRequestEvent} 是 @AwaitingEvent，代理会同步等待其返回，
+     * 因此热路径尽量只查内存；仅在内存未命中（如插件重启后）时回源一次数据库。
+     */
+    private final Map<String, Long> sessionCache = new ConcurrentHashMap<>();
+
     public AuthService(Supplier<VelocityAuthConfig> config,
                        StorageService storage,
                        AccountCache cache,
+                       BindingIndex bindingIndex,
                        PasswordHasher hasher,
                        PendingBindingStore pendingBindings,
                        RateLimiter rateLimiter,
@@ -59,12 +74,14 @@ public final class AuthService {
         this.config = config;
         this.storage = storage;
         this.cache = cache;
+        this.bindingIndex = bindingIndex;
         this.hasher = hasher;
         this.pendingBindings = pendingBindings;
         this.rateLimiter = rateLimiter;
         this.floodgate = floodgate;
         this.async = async;
         this.log = log;
+        this.dummyHash = hasher.hash("velocityauth-dummy-password");
     }
 
     // ------------------------------------------------------------------ 校验
@@ -93,6 +110,9 @@ public final class AuthService {
         if (password.length() > rule.maxLength()) {
             return AuthOutcomes.RegisterStatus.PASSWORD_TOO_LONG;
         }
+        if (!PasswordHasher.withinByteLimit(password)) {
+            return AuthOutcomes.RegisterStatus.PASSWORD_TOO_LONG_BYTES;
+        }
         return null;
     }
 
@@ -107,9 +127,6 @@ public final class AuthService {
         return async.supply(() -> {
             try {
                 VelocityAuthConfig cfg = config.get();
-                if (cfg.registration().gate() != VelocityAuthConfig.Registration.Gate.NONE) {
-                    return AuthOutcomes.Register.gate(cfg.registration().gate().name().toLowerCase(Locale.ROOT));
-                }
                 if (!rateLimiter.tryAcquire("register:ip:" + ip, REGISTER_PER_IP_PER_MINUTE, ONE_MINUTE)) {
                     return AuthOutcomes.Register.failure(AuthOutcomes.RegisterStatus.RATE_LIMITED);
                 }
@@ -120,7 +137,7 @@ public final class AuthService {
                 if (pwIssue != null) {
                     return AuthOutcomes.Register.failure(pwIssue);
                 }
-                if (confirm != null && !confirm.isEmpty() && !password.equals(confirm)) {
+                if (confirm == null || confirm.isEmpty() || !password.equals(confirm)) {
                     return AuthOutcomes.Register.failure(AuthOutcomes.RegisterStatus.PASSWORD_MISMATCH);
                 }
 
@@ -129,18 +146,24 @@ public final class AuthService {
                     return AuthOutcomes.Register.failure(AuthOutcomes.RegisterStatus.NAME_TAKEN);
                 }
 
+                // 要求绑定渠道时，账号先落库为「待绑定」：不能登录，且超时未绑定会被自动清除
+                AccountStatus status = cfg.registration().bindingRequired()
+                        ? AccountStatus.PENDING_BINDING : AccountStatus.ACTIVE;
                 String hash = hasher.hash(password);
                 long now = nowSeconds();
-                long accountId = storage.accounts().insert(name, nameLower, ProfileFactory.offlineUuid(name),
-                        hash, AccountStatus.ACTIVE, null, now);
-                storage.identities().upsert(accountId, identity.kind(), identity.identifier(), now);
-                storage.audit().log(now, accountId, AuditEntry.REGISTER, ip, "connection=" + identity.identifier() + " kind=" + identity.kind().dbValue());
+                long accountId = storage.createAccount(name, nameLower, ProfileFactory.offlineUuid(name),
+                        hash, status, null, now, identity.kind(), identity.identifier(),
+                        null, null);
+                storage.audit().log(now, accountId, AuditEntry.REGISTER, ip,
+                        "connection=" + identity.identifier() + " kind=" + identity.kind().dbValue()
+                                + " status=" + status.dbValue());
 
                 Account account = storage.accounts().findById(accountId)
                         .orElseThrow(() -> new IllegalStateException("注册后无法读回账号"));
                 cache.put(account);
                 cache.indexIdentity(identity.kind(), identity.identifier(), accountId);
-                log.info("新账号注册：{}（连接名 {}，{} 端，IP {}）", account.name(), identity.identifier(), identity.kind().dbValue(), ip);
+                log.info("新账号注册：{}（连接名 {}，{} 端，状态 {}，IP {}）", account.name(),
+                        identity.identifier(), identity.kind().dbValue(), status.dbValue(), ip);
                 return AuthOutcomes.Register.success(account);
             } catch (RuntimeException e) {
                 log.error("注册失败：" + e.getMessage(), e);
@@ -168,16 +191,22 @@ public final class AuthService {
 
                 if (account == null) {
                     // 仍执行一次 bcrypt，抹平响应时间差异
-                    hasher.verify(password, DUMMY_HASH);
+                    hasher.verify(password, dummyHash);
                     return AuthOutcomes.Login.failure(AuthOutcomes.LoginStatus.WRONG_PASSWORD);
                 }
                 if (account.locked()) {
+                    // 同样执行一次 bcrypt，避免"锁定"状态可通过耗时区分
+                    hasher.verify(password, dummyHash);
                     return AuthOutcomes.Login.failure(AuthOutcomes.LoginStatus.LOCKED);
                 }
                 if (!hasher.verify(password, account.passwordHash())) {
                     storage.audit().log(nowSeconds(), account.id(), AuditEntry.LOGIN_FAILED, ip,
                             "connection=" + identity.identifier());
                     return AuthOutcomes.Login.failure(AuthOutcomes.LoginStatus.WRONG_PASSWORD);
+                }
+                // 密码正确但未满足「注册后必须绑定」的要求：不放行，提示先绑定
+                if (!bindingSatisfied(account)) {
+                    return AuthOutcomes.Login.bindingRequired(account);
                 }
 
                 long now = nowSeconds();
@@ -193,6 +222,87 @@ public final class AuthService {
             } catch (RuntimeException e) {
                 log.error("登录失败：" + e.getMessage(), e);
                 return AuthOutcomes.Login.failure(AuthOutcomes.LoginStatus.ERROR);
+            }
+        });
+    }
+
+    // ------------------------------------------------------------------ 注册后绑定要求
+
+    /**
+     * 账号是否已满足「注册后必须绑定」的要求。
+     * <p>
+     * 未配置 {@code registration.require-binding} 时恒为 true；否则只要**绑定渠道之一**已绑定即算满足。
+     * 该判断是「绑定为准」而非「状态为准」，因此把配置从无到有后，历史未绑定账号也会被拦在登录外。
+     * <p>
+     * <b>纯内存</b>（查 {@link BindingIndex}），所以可以用在登录握手热路径上。
+     */
+    public boolean bindingSatisfied(Account account) {
+        return bindingIndex.satisfies(account.id(), config.get().registration().requireBinding());
+    }
+
+    /**
+     * 若解绑 {@code removed} 渠道，账号是否仍满足绑定要求。
+     * <p>
+     * 用于 {@code /unbind} 的前置校验：不允许把账号解绑成「不满足要求」的状态。
+     */
+    public boolean bindingSatisfiedWithout(Account account, BindingType removed) {
+        List<BindingType> remaining = config.get().registration().requireBinding().stream()
+                .filter(type -> type != removed)
+                .toList();
+        return bindingIndex.satisfies(account.id(), remaining);
+    }
+
+    /** 账号被删除时同步清理内存索引（账号缓存 + 绑定索引）。 */
+    public void forgetAccount(long accountId) {
+        cache.remove(accountId);
+        bindingIndex.removeAccount(accountId);
+    }
+
+    /**
+     * 删除账号（级联删除身份 / 绑定 / 会话），并同步清理内存索引。
+     *
+     * @return 是否确实删除了账号
+     */
+    public CompletableFuture<Boolean> deleteAccount(long accountId, String ip, String detail) {
+        return async.supply(() -> {
+            try {
+                int removed = storage.accounts().delete(accountId);
+                if (removed > 0) {
+                    forgetAccount(accountId);
+                    storage.audit().log(nowSeconds(), null, AuditEntry.DELETE_ACCOUNT, ip, detail);
+                }
+                return removed > 0;
+            } catch (RuntimeException e) {
+                log.error("删除账号失败：" + e.getMessage(), e);
+                return false;
+            }
+        });
+    }
+
+    /**
+     * 绑定完成后尝试激活：仅当账号仍为 {@code pending_binding} 且已满足绑定要求时置为 {@code active}。
+     *
+     * @return 是否发生了激活（调用方据此决定是否自动登录）
+     */
+    public CompletableFuture<Boolean> activateIfBindingSatisfied(long accountId) {
+        return async.supply(() -> {
+            try {
+                Account account = cache.byId(accountId)
+                        .or(() -> storage.accounts().findById(accountId))
+                        .orElse(null);
+                if (account == null || account.status() != AccountStatus.PENDING_BINDING) {
+                    return false;
+                }
+                if (!bindingSatisfied(account)) {
+                    return false;
+                }
+                storage.accounts().updateStatus(accountId, AccountStatus.ACTIVE);
+                storage.accounts().findById(accountId).ifPresent(cache::put);
+                log.info("账号 {} 已完成绑定，激活为 active", account.name());
+                return true;
+            } catch (RuntimeException e) {
+                log.error("激活账号失败：" + e.getMessage(), e);
+                return false;
             }
         });
     }
@@ -355,15 +465,26 @@ public final class AuthService {
         if (account.locked()) {
             return Optional.empty();
         }
-        long now = nowSeconds();
-        Optional<LoginSession> session;
-        if (sessionConfig.bindToIp()) {
-            session = storage.sessions().findValid(account.id(), ip, now);
-        } else {
-            session = storage.sessions().findAllValidByIp(ip, now).stream()
-                    .filter(candidate -> candidate.accountId() == account.id())
-                    .findFirst();
+        // 会话保持同样属于"登录"：未满足绑定要求的账号不放行（纯内存判断，不碰热路径性能）
+        if (!bindingSatisfied(account)) {
+            return Optional.empty();
         }
+        long now = nowSeconds();
+        String key = sessionKey(account.id(), ip, sessionConfig.bindToIp());
+        Long cached = sessionCache.get(key);
+        if (cached != null) {
+            // 内存命中：热路径完全不查库
+            if (cached > now) {
+                return Optional.of(account);
+            }
+            sessionCache.remove(key);
+            return Optional.empty();
+        }
+        // 内存未命中（如插件刚重启）：回源一次并写入缓存
+        Optional<LoginSession> session = sessionConfig.bindToIp()
+                ? storage.sessions().findValid(account.id(), ip, now)
+                : storage.sessions().findAnyValid(account.id(), now);
+        session.ifPresent(s -> sessionCache.put(key, s.expiresAt()));
         return session.map(s -> account);
     }
 
@@ -374,11 +495,41 @@ public final class AuthService {
             return;
         }
         long now = nowSeconds();
-        storage.sessions().insert(accountId, ip, now, now + sessionConfig.ttlMinutes() * 60L);
+        long expiresAt = now + sessionConfig.ttlMinutes() * 60L;
+        storage.sessions().insert(accountId, ip, now, expiresAt);
+        sessionCache.put(sessionKey(accountId, ip, sessionConfig.bindToIp()), expiresAt);
+    }
+
+    /**
+     * 异步记录会话保持（供事件/命令线程调用）。
+     * <p>
+     * 除了 {@code PostLogin}，**登录成功但免重连**（连接名与账号名一致）时也必须记录，
+     * 否则这类玩家（最常见情形）永远无法通过会话保持免密登录。
+     */
+    public void recordSessionAsync(long accountId, String ip) {
+        if (!config.get().auth().session().enabled()) {
+            return;
+        }
+        async.run(() -> {
+            try {
+                recordSession(accountId, ip);
+            } catch (RuntimeException e) {
+                log.warn("记录会话保持失败：{}", e.getMessage());
+            }
+        });
     }
 
     public void clearSessions(long accountId) {
         storage.sessions().deleteByAccountId(accountId);
+        // 同步失效内存索引，否则登出/踢出后仍会被判定为"会话有效"
+        String prefix = accountId + "|";
+        String exact = Long.toString(accountId);
+        sessionCache.keySet().removeIf(k -> k.equals(exact) || k.startsWith(prefix));
+    }
+
+    /** 会话缓存 key：绑定 IP 时为 {@code accountId|ip}，否则仅 {@code accountId}。 */
+    private static String sessionKey(long accountId, String ip, boolean bindToIp) {
+        return bindToIp ? accountId + "|" + (ip == null ? "" : ip) : Long.toString(accountId);
     }
 
     // ------------------------------------------------------------------ 维护
@@ -387,11 +538,41 @@ public final class AuthService {
     public void purgeExpired() {
         pendingBindings.purge();
         rateLimiter.purge(Duration.ofMinutes(10));
+        long now = nowSeconds();
+        sessionCache.entrySet().removeIf(entry -> entry.getValue() <= now);
+        purgeUnboundAccounts(now);
         async.run(() -> {
             try {
                 storage.sessions().deleteExpired(nowSeconds());
             } catch (RuntimeException e) {
                 log.warn("清理过期会话失败：{}", e.getMessage());
+            }
+        });
+    }
+
+    /**
+     * 清除超时未绑定的账号（{@code registration.unbound-ttl-minutes}）。
+     * <p>
+     * 只删「注册后从未完成绑定」的 {@code pending_binding} 账号，级联删除其身份/绑定，
+     * 从而释放被占用的账号名。ttl = 0 表示不自动清除。
+     */
+    private void purgeUnboundAccounts(long now) {
+        int ttlMinutes = config.get().registration().unboundTtlMinutes();
+        if (ttlMinutes <= 0) {
+            return;
+        }
+        long cutoff = now - ttlMinutes * 60L;
+        async.run(() -> {
+            try {
+                List<Account> stale = storage.accounts().findPendingOlderThan(cutoff);
+                for (Account account : stale) {
+                    storage.accounts().delete(account.id());
+                    forgetAccount(account.id());
+                    log.info("未绑定账号超时清除：{}（注册于 {}，TTL {} 分钟）",
+                            account.name(), account.createdAt(), ttlMinutes);
+                }
+            } catch (RuntimeException e) {
+                log.warn("清理未绑定账号失败：{}", e.getMessage());
             }
         });
     }
@@ -406,6 +587,10 @@ public final class AuthService {
 
     public AccountCache cache() {
         return cache;
+    }
+
+    public BindingIndex bindingIndex() {
+        return bindingIndex;
     }
 
     public StorageService storage() {

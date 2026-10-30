@@ -3,6 +3,7 @@ package io.github.railgun19457.velocityauth.storage;
 import io.github.railgun19457.velocityauth.storage.model.Binding;
 import io.github.railgun19457.velocityauth.storage.model.BindingType;
 
+import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
@@ -39,6 +40,20 @@ public final class BindingRepository {
         });
     }
 
+    /** 全部绑定（仅用于启动预热内存索引）。 */
+    public List<Binding> findAll() {
+        return database.withConnection(connection -> {
+            try (PreparedStatement ps = connection.prepareStatement("SELECT " + COLUMNS + " FROM bindings");
+                 ResultSet rs = ps.executeQuery()) {
+                List<Binding> out = new ArrayList<>();
+                while (rs.next()) {
+                    out.add(map(rs));
+                }
+                return out;
+            }
+        });
+    }
+
     public Optional<Binding> find(long accountId, BindingType type) {
         return database.withConnection(connection -> {
             try (PreparedStatement ps = connection.prepareStatement(
@@ -69,8 +84,7 @@ public final class BindingRepository {
         });
     }
 
-    /** 该标识已绑定的不同账号数（用于基数限制）。 */
-    public int countDistinctAccounts(BindingType type, String identifier) {
+    /** 该标识已绑定的不同账号数（用于基数限制）。 */    public int countDistinctAccounts(BindingType type, String identifier) {
         return database.withConnection(connection -> {
             try (PreparedStatement ps = connection.prepareStatement(
                     "SELECT COUNT(DISTINCT account_id) FROM bindings WHERE type = ? AND identifier = ?")) {
@@ -99,18 +113,24 @@ public final class BindingRepository {
 
     public void insert(long accountId, BindingType type, String identifier, long verifiedAt, long createdAt) {
         database.inTransaction(connection -> {
-            try (PreparedStatement ps = connection.prepareStatement(
-                    "INSERT INTO bindings (account_id, type, identifier, verified_at, created_at)"
-                            + " VALUES (?, ?, ?, ?, ?)")) {
-                ps.setLong(1, accountId);
-                ps.setString(2, type.dbValue());
-                ps.setString(3, identifier);
-                ps.setLong(4, verifiedAt);
-                ps.setLong(5, createdAt);
-                ps.executeUpdate();
-            }
+            insert(connection, accountId, type, identifier, verifiedAt, createdAt);
             return null;
         });
+    }
+
+    /** 在调用方提供的事务连接内插入绑定（供注册流程的原子写入使用）。 */
+    void insert(Connection connection, long accountId, BindingType type, String identifier, long verifiedAt,
+                long createdAt) throws SQLException {
+        try (PreparedStatement ps = connection.prepareStatement(
+                "INSERT INTO bindings (account_id, type, identifier, verified_at, created_at)"
+                        + " VALUES (?, ?, ?, ?, ?)")) {
+            ps.setLong(1, accountId);
+            ps.setString(2, type.dbValue());
+            ps.setString(3, identifier);
+            ps.setLong(4, verifiedAt);
+            ps.setLong(5, createdAt);
+            ps.executeUpdate();
+        }
     }
 
     public int delete(long accountId, BindingType type) {

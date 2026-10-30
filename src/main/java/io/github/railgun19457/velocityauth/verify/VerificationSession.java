@@ -143,14 +143,6 @@ public final class VerificationSession {
         return attempts.incrementAndGet() <= maxAttempts;
     }
 
-    public boolean attemptsExceeded() {
-        return attempts.get() > maxAttempts;
-    }
-
-    public void markFinished() {
-        this.finished = true;
-    }
-
     /** 原子地标记结束；已被标记则返回 false（避免重复完成）。 */
     public synchronized boolean markFinishedIfOpen() {
         if (finished) {

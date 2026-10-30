@@ -11,13 +11,13 @@ import com.velocitypowered.api.proxy.ProxyServer;
 import io.github.railgun19457.velocityauth.auth.AccountCache;
 import io.github.railgun19457.velocityauth.auth.AuthService;
 import io.github.railgun19457.velocityauth.auth.AuthSessionRegistry;
+import io.github.railgun19457.velocityauth.auth.BindingIndex;
 import io.github.railgun19457.velocityauth.auth.BindingService;
 import io.github.railgun19457.velocityauth.auth.PasswordHasher;
 import io.github.railgun19457.velocityauth.auth.PendingBindingStore;
 import io.github.railgun19457.velocityauth.auth.RateLimiter;
 import io.github.railgun19457.velocityauth.auth.ReconnectService;
 import io.github.railgun19457.velocityauth.auth.RecoveryService;
-import io.github.railgun19457.velocityauth.auth.RegistrationFlow;
 import io.github.railgun19457.velocityauth.bot.BotQqGateway;
 import io.github.railgun19457.velocityauth.bot.BotServer;
 import io.github.railgun19457.velocityauth.bot.BotSession;
@@ -25,6 +25,8 @@ import io.github.railgun19457.velocityauth.bot.KeyStore;
 import io.github.railgun19457.velocityauth.auth.IdentityResolver;
 import io.github.railgun19457.velocityauth.platform.FloodgateHook;
 import io.github.railgun19457.velocityauth.bot.PairingService;
+import io.github.railgun19457.velocityauth.mail.EmailTemplateService;
+import io.github.railgun19457.velocityauth.mail.SmtpSender;
 import io.github.railgun19457.velocityauth.command.CommandRegistrar;
 import io.github.railgun19457.velocityauth.config.ConfigService;
 import io.github.railgun19457.velocityauth.config.VelocityAuthConfig;
@@ -33,12 +35,10 @@ import io.github.railgun19457.velocityauth.listener.CommandGuardListener;
 import io.github.railgun19457.velocityauth.listener.LoginListener;
 import io.github.railgun19457.velocityauth.listener.PlayerLifecycleListener;
 import io.github.railgun19457.velocityauth.listener.RoutingListener;
-import io.github.railgun19457.velocityauth.mail.SmtpSender;
 import io.github.railgun19457.velocityauth.storage.StorageService;
 import io.github.railgun19457.velocityauth.util.AsyncExecutor;
 import io.github.railgun19457.velocityauth.util.PluginLogger;
 import io.github.railgun19457.velocityauth.verify.QqVerificationGateway;
-import io.github.railgun19457.velocityauth.verify.StubQqGateway;
 import io.github.railgun19457.velocityauth.verify.VerificationService;
 import net.kyori.adventure.text.serializer.plain.PlainTextComponentSerializer;
 import org.slf4j.Logger;
@@ -75,8 +75,8 @@ public final class VelocityAuthPlugin {
     private AuthService authService;
     private ReconnectService reconnectService;
     private VerificationService verificationService;
-    private RegistrationFlow registrationFlow;
     private BindingService bindingService;
+    private EmailTemplateService emailTemplate;
     private RecoveryService recoveryService;
     private KeyStore keyStore;
     private PairingService pairingService;
@@ -105,6 +105,7 @@ public final class VelocityAuthPlugin {
                 log.info("已释放默认配置到 {}", configService.configFile());
             }
             VelocityAuthConfig config = configService.load();
+            LangService.releaseShipped(getClass(), dataDirectory, logger);
             this.langService = LangService.load(config.language(), getClass(), dataDirectory, logger);
 
             this.storage = StorageService.open(config.database(), dataDirectory, logger);
@@ -114,26 +115,32 @@ public final class VelocityAuthPlugin {
 
             AccountCache cache = new AccountCache(storage.accounts(), storage.identities(), log);
             cache.load();
+            BindingIndex bindingIndex = new BindingIndex(storage.bindings(), log);
+            bindingIndex.load();
 
             PasswordHasher hasher = new PasswordHasher(config.auth().bcryptCost());
             PendingBindingStore pendingBindings = new PendingBindingStore();
             RateLimiter rateLimiter = new RateLimiter();
-            this.authService = new AuthService(this::config, storage, cache, hasher, pendingBindings,
+            this.authService = new AuthService(this::config, storage, cache, bindingIndex, hasher, pendingBindings,
                     rateLimiter, floodgate, async, log);
             this.reconnectService = new ReconnectService(server, this, this::config, log);
             this.sessionRegistry = new AuthSessionRegistry();
 
             SmtpSender smtpSender = new SmtpSender(this::config, async, log);
+            this.emailTemplate = new EmailTemplateService(dataDirectory, getClass(), logger);
+            if (emailTemplate.releaseDefaultIfMissing()) {
+                log.info("已释放默认邮件模板到 {}", emailTemplate.file());
+            }
+            emailTemplate.load();
             this.keyStore = KeyStore.load(dataDirectory, log);
             this.pairingService = new PairingService();
             QqVerificationGateway qqGateway = new BotQqGateway(this::config, () -> botServer);
             this.verificationService = new VerificationService(this::config, this::lang, this::serverName,
-                    smtpSender, qqGateway, rateLimiter,
+                    smtpSender, emailTemplate, qqGateway, rateLimiter,
                     (task, delay) -> server.getScheduler().buildTask(this, task).delay(delay).schedule(),
                     async, log);
             startBotServer();
-            this.registrationFlow = new RegistrationFlow(this::config, authService, verificationService, async, log);
-            this.bindingService = new BindingService(this::config, storage, async, log);
+            this.bindingService = new BindingService(this::config, storage, bindingIndex, async, log);
             this.recoveryService = new RecoveryService(this::config, storage, verificationService, async, log);
 
             registerListeners();
@@ -155,10 +162,13 @@ public final class VelocityAuthPlugin {
                     config.servers().login(), config.servers().defaultServer(), config.servers().rememberLast());
         } catch (IOException e) {
             log.error("启动失败：无法读取配置或语言文件", e);
+            shutdownComponents();
         } catch (RuntimeException e) {
             log.error("启动失败：" + e.getMessage(), e);
+            shutdownComponents();
         } catch (java.sql.SQLException e) {
             log.error("启动失败：数据库不可用（" + e.getMessage() + "）", e);
+            shutdownComponents();
         }
     }
 
@@ -209,26 +219,44 @@ public final class VelocityAuthPlugin {
     @Subscribe
     public void onProxyShutdown(ProxyShutdownEvent event) {
         this.enabled = false;
-        if (botServer != null) {
-            botServer.shutdown();
-        }
-        if (async != null) {
-            async.close();
-        }
-        if (storage != null) {
-            storage.close();
-        }
+        shutdownComponents();
         log.info("VelocityAuth 正在卸载…");
+    }
+
+    /** 释放组件（启动失败与正常关服共用；可重复调用）。 */
+    private void shutdownComponents() {
+        KeyStore keys = keyStore;
+        if (keys != null) {
+            keyStore = null;
+            keys.flush();
+        }
+        BotServer bot = botServer;
+        if (bot != null) {
+            botServer = null;
+            bot.shutdown();
+        }
+        AsyncExecutor executor = async;
+        if (executor != null) {
+            async = null;
+            executor.close();
+        }
+        StorageService store = storage;
+        if (store != null) {
+            storage = null;
+            store.close();
+        }
     }
 
     public boolean enabled() {
         return enabled;
     }
 
-    /** 热重载配置与语言文件；失败时抛出，调用方负责提示。 */
+    /** 热重载配置、语言文件与邮件模板；失败时抛出，调用方负责提示。 */
     public void reload() throws IOException {
         VelocityAuthConfig config = configService.load();
+        LangService.releaseShipped(getClass(), dataDirectory, logger);
         this.langService = LangService.load(config.language(), getClass(), dataDirectory, logger);
+        emailTemplate.load();
     }
 
     public ProxyServer server() {
@@ -277,10 +305,6 @@ public final class VelocityAuthPlugin {
 
     public VerificationService verifications() {
         return verificationService;
-    }
-
-    public RegistrationFlow registrationFlow() {
-        return registrationFlow;
     }
 
     public BindingService bindings() {

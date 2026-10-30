@@ -47,6 +47,12 @@ public final class UnbindCommand extends PlayerCommandSupport {
             player.sendMessage(plugin.lang().msg("command.unbind.not-bound"));
             return;
         }
+        // 不允许把账号解绑成「不满足注册后必须绑定要求」的状态
+        if (plugin.config().registration().requireBinding().contains(type)
+                && !plugin.authService().bindingSatisfiedWithout(account, type)) {
+            player.sendMessage(plugin.lang().msg("command.unbind.required", "type", type.dbValue()));
+            return;
+        }
         String target = binding.get().identifier();
         String ip = ipOf(player);
         VerificationChannel channel = type == BindingType.EMAIL
@@ -59,13 +65,14 @@ public final class UnbindCommand extends PlayerCommandSupport {
                 .target(channel == VerificationChannel.EMAIL ? target : null)
                 .data(Map.of("account_id", Long.toString(account.id()), "type", type.dbValue()))
                 .onDispatch(VerificationPrompts.dispatchHandler(plugin, player,
-                        channel == VerificationChannel.EMAIL ? target : null))
+                        channel == VerificationChannel.EMAIL ? target : null, VerificationPurpose.UNBIND))
                 .build());
         if (!start.accepted()) {
             return;
         }
         if (channel == VerificationChannel.QQ) {
-            VerificationPrompts.sendQqInstruction(plugin, player, start.session().code());
+            VerificationPrompts.sendQqInstruction(plugin, player, start.session().code(),
+                    VerificationPurpose.UNBIND);
         }
         start.completion().thenAccept(result -> {
             switch (result.status()) {
@@ -82,7 +89,13 @@ public final class UnbindCommand extends PlayerCommandSupport {
     }
 
     @Override
+    public java.util.List<String> suggest(Invocation invocation) {
+        // /unbind <email|qq>
+        return suggestBindingChannel(invocation, 0);
+    }
+
+    @Override
     public boolean hasPermission(Invocation invocation) {
-        return invocation.source() instanceof Player;
+        return availableWhenAuthenticated(invocation);
     }
 }

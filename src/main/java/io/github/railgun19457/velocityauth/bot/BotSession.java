@@ -248,7 +248,8 @@ public final class BotSession {
     }
 
     private void handlePairProve(Frame frame) {
-        if (frame.ts() / 1000L > pairChallengeExpiresAt) {
+        // frame.ts() 已是 unix 秒；challenge 过期时间同样是秒，直接比较即可
+        if (frame.ts() > pairChallengeExpiresAt) {
             pairingService.consume(pairingId);
             throw new ProtocolException(ProtocolException.PAIRING_EXPIRED, "配对 challenge 已过期");
         }
@@ -371,7 +372,8 @@ public final class BotSession {
     }
 
     private void handleAuthProve(Frame frame) {
-        if (frame.ts() / 1000L > authChallengeExpiresAt) {
+        // frame.ts() 已是 unix 秒；challenge 过期时间同样是秒，直接比较即可
+        if (frame.ts() > authChallengeExpiresAt) {
             throw new ProtocolException(ProtocolException.SIGNATURE_INVALID, "auth challenge 已过期");
         }
         String input = Transcript.signatureInput("auth", frame.type(), frame.id(), frame.ts(), frame.nonce(),

@@ -1,16 +1,16 @@
 package io.github.railgun19457.velocityauth.bot;
 
 import io.github.railgun19457.velocityauth.bot.protocol.Base64Url;
-import io.github.railgun19457.velocityauth.bot.protocol.Crypto;
 
 import java.security.SecureRandom;
 import java.util.ArrayList;
 import java.util.Iterator;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicInteger;
 
 /**
  * 配对码管理（PROTOCOL.md 4.1）。
@@ -23,7 +23,8 @@ public final class PairingService {
     private static final int CODE_BYTES = 24;
 
     private final SecureRandom random = new SecureRandom();
-    private final Map<String, Pairing> pairings = new LinkedHashMap<>();
+    // 可能被多条 bot 连接线程并发访问（WebSocketServer 每连接一线程），必须线程安全
+    private final Map<String, Pairing> pairings = new ConcurrentHashMap<>();
 
     public static final class Pairing {
         private final String pairingId;
@@ -31,7 +32,7 @@ public final class PairingService {
         private final long createdAt;
         private final long expiresAt;
         private final int maxAttempts;
-        private int attempts;
+        private final AtomicInteger attempts = new AtomicInteger();
 
         private Pairing(String pairingId, String code, long createdAt, long expiresAt, int maxAttempts) {
             this.pairingId = pairingId;
@@ -58,7 +59,7 @@ public final class PairingService {
         }
 
         public int attempts() {
-            return attempts;
+            return attempts.get();
         }
 
         public int maxAttempts() {
@@ -118,8 +119,7 @@ public final class PairingService {
         if (pairing == null) {
             return false;
         }
-        pairing.attempts++;
-        if (pairing.attempts >= pairing.maxAttempts) {
+        if (pairing.attempts.incrementAndGet() >= pairing.maxAttempts) {
             pairings.remove(pairingId);
             return false;
         }
@@ -158,10 +158,5 @@ public final class PairingService {
         byte[] out = new byte[length];
         random.nextBytes(out);
         return out;
-    }
-
-    /** 仅供内部使用：生成一个随机 nonce（握手用）。 */
-    static String randomNonce() {
-        return Crypto.randomNonce();
     }
 }

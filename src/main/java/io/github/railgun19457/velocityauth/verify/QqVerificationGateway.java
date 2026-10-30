@@ -3,7 +3,7 @@ package io.github.railgun19457.velocityauth.verify;
 /**
  * QQ 验证渠道与 bot 之间的边界。
  * <p>
- * M4 使用 {@link StubQqGateway} 桩实现；M6 接入真实 bot 通道后替换。
+ * 实现见 {@code BotQqGateway}（真实 bot 通道）。
  */
 public interface QqVerificationGateway {
 

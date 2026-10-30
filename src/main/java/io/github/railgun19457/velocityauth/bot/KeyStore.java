@@ -18,6 +18,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * 密钥存储（DESIGN 8.2 / 12.2）。
@@ -31,13 +32,18 @@ public final class KeyStore {
 
     public static final String DEFAULT_KEY_ID = "srv-k1";
 
+    /** {@code touch} 落盘的最小间隔（毫秒）。 */
+    private static final long TOUCH_SAVE_INTERVAL_MILLIS = 60_000L;
+
     private final Path directory;
     private final Path identityFile;
     private final Path clientsFile;
     private final PluginLogger log;
 
     private final Map<String, Object> identity;
-    private final Map<String, PairedClient> clients = new LinkedHashMap<>();
+    // 可能被多条 bot 连接线程与命令线程并发访问，必须线程安全
+    private final Map<String, PairedClient> clients = new ConcurrentHashMap<>();
+    private volatile long lastTouchSaveAt;
 
     public record PairedClient(String clientId, String keyId, byte[] publicKey, String fingerprint,
                                long pairedAt, long lastSeen) {
@@ -151,13 +157,13 @@ public final class KeyStore {
         return new ArrayList<>(clients.values());
     }
 
-    public void pair(PairedClient client) {
+    public synchronized void pair(PairedClient client) {
         clients.put(key(client.clientId(), client.keyId()), client);
         saveClients();
         log.info("已配对 bot 客户端 {}（{}）", client.clientId(), client.fingerprint());
     }
 
-    public boolean revoke(String clientId) {
+    public synchronized boolean revoke(String clientId) {
         boolean removed = clients.entrySet().removeIf(entry -> entry.getValue().clientId().equals(clientId));
         if (removed) {
             saveClients();
@@ -165,14 +171,24 @@ public final class KeyStore {
         return removed;
     }
 
-    public void touch(String clientId, String keyId) {
+    public synchronized void touch(String clientId, String keyId) {
         PairedClient existing = clients.get(key(clientId, keyId));
         if (existing == null) {
             return;
         }
+        long now = System.currentTimeMillis();
         clients.put(key(clientId, keyId), new PairedClient(existing.clientId(), existing.keyId(),
-                existing.publicKey(), existing.fingerprint(), existing.pairedAt(),
-                System.currentTimeMillis() / 1000L));
+                existing.publicKey(), existing.fingerprint(), existing.pairedAt(), now / 1000L));
+        // 心跳（pong）很频繁：last_seen 只更新内存，落盘节流到最多每 60 秒一次，
+        // 其余时间靠 pair/revoke/flush（关服）持久化，避免高频磁盘写入。
+        if (now - lastTouchSaveAt >= TOUCH_SAVE_INTERVAL_MILLIS) {
+            lastTouchSaveAt = now;
+            saveClients();
+        }
+    }
+
+    /** 把内存中的客户端状态强制落盘（关服时调用）。 */
+    public synchronized void flush() {
         saveClients();
     }
 
@@ -224,9 +240,5 @@ public final class KeyStore {
 
     public Path directory() {
         return directory;
-    }
-
-    public Path identityFile() {
-        return identityFile;
     }
 }

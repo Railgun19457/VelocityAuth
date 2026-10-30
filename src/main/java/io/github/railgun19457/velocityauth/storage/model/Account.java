@@ -33,9 +33,4 @@ public record Account(
     public boolean locked() {
         return status == AccountStatus.LOCKED;
     }
-
-    public Account withLastServer(String server) {
-        return new Account(id, name, nameLower, uuid, passwordHash, status, premiumUuid, server,
-                createdAt, lastLoginAt, lastIp);
-    }
 }

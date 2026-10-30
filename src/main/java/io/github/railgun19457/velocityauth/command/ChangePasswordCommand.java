@@ -5,6 +5,7 @@ import io.github.railgun19457.velocityauth.VelocityAuthPlugin;
 import io.github.railgun19457.velocityauth.auth.AuthOutcomes;
 import io.github.railgun19457.velocityauth.auth.AuthSession;
 import io.github.railgun19457.velocityauth.auth.AuthSessionRegistry;
+import io.github.railgun19457.velocityauth.auth.PasswordHasher;
 import io.github.railgun19457.velocityauth.storage.model.Account;
 
 /**
@@ -51,12 +52,14 @@ public final class ChangePasswordCommand extends PlayerCommandSupport {
                     "min", plugin.config().auth().password().minLength()));
             case PASSWORD_TOO_LONG -> player.sendMessage(plugin.lang().msg("command.register.password-too-long",
                     "max", plugin.config().auth().password().maxLength()));
+            case PASSWORD_TOO_LONG_BYTES -> player.sendMessage(plugin.lang().msg(
+                    "command.register.password-too-long-bytes", "bytes", PasswordHasher.MAX_PASSWORD_BYTES));
             case NOT_FOUND, ERROR -> player.sendMessage(plugin.lang().msg("generic.internal-error"));
         }
     }
 
     @Override
     public boolean hasPermission(Invocation invocation) {
-        return invocation.source() instanceof Player;
+        return availableWhenAuthenticated(invocation);
     }
 }

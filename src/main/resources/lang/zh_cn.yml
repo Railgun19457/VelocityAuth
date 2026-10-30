@@ -1,3 +1,4 @@
+# version: 1
 # ============ VelocityAuth 中文语言文件 ============
 # 文本使用 MiniMessage 语法；{xxx} 为占位符。
 prefix: "<gold>[认证]</gold> "
@@ -22,18 +23,19 @@ command:
     reconnect: "<green>登录成功，请重新连接以进入服务器。</green>"
     rate-limited: "<red>尝试过于频繁，请稍后再试。</red>"
     locked: "<red>该账号已被锁定，请联系管理员。</red>"
+    binding-required: "<red>密码正确，但该账号需要先完成绑定才能登录。</red>"
   register:
-    usage: "<red>用法：/register <账号> <密码> [确认密码]</red>"
+    usage: "<red>用法：/register <账号> <密码> <确认密码></red>"
     success: "<green>注册成功，正在进入服务器…</green>"
+    success-pending: "<green>注册成功！</green><yellow>账号 {account} 需要完成绑定后才能登录。</yellow>"
     name-taken: "<red>该账号名已被占用。</red>"
     name-invalid: "<red>账号名不合法：长度需在 {min}-{max} 之间，且只能包含字母、数字与下划线。</red>"
     password-too-short: "<red>密码太短，至少需要 {min} 个字符。</red>"
     password-too-long: "<red>密码太长，最多 {max} 个字符。</red>"
+    password-too-long-bytes: "<red>密码太长：UTF-8 编码后最多 {bytes} 字节（bcrypt 限制），请缩短。</red>"
     password-mismatch: "<red>两次输入的密码不一致。</red>"
     already-registered: "<red>你已经注册或登录了。</red>"
     rate-limited: "<red>注册过于频繁，请稍后再试。</red>"
-    gate-email: "<yellow>本服开启邮箱验证，请先绑定邮箱后再注册。</yellow>"
-    gate-qq: "<yellow>本服开启 QQ 验证，请先绑定 QQ 后再注册。</yellow>"
   logout:
     success: "<yellow>已退出登录，请重新连接。</yellow>"
     not-authenticated: "<red>你尚未登录。</red>"
@@ -49,24 +51,29 @@ command:
   bind:
     usage: "<red>用法：/bind <email|qq> [值]</red>"
     email-usage: "<red>用法：/bind email <邮箱地址></red>"
+    email-domains-allow: "<gray>支持的邮箱域名：{domains}</gray>"
+    email-domains-deny: "<gray>禁止使用的邮箱域名：{domains}</gray>"
+    email-domains-any: "<gray>邮箱域名不限。</gray>"
     email-invalid: "<red>邮箱地址格式不正确。</red>"
     domain-not-allowed: "<red>该邮箱域名不被允许。</red>"
     email-limit: "<red>该邮箱已绑定的账号数已达上限。</red>"
     qq-limit: "<red>该 QQ 已绑定的账号数已达上限。</red>"
     already-bound: "<red>你已绑定了该类型。</red>"
     success: "<green>绑定成功。</green>"
+    activated: "<green>绑定成功，账号已激活，正在进入服务器…</green>"
+    required-email: "<yellow>- 绑定邮箱：</yellow><click:suggest_command:'/bind email '><hover:show_text:'<gray>点击填充：/bind email 【邮箱】</gray>'><gold><bold>[绑定邮箱]</bold></gold></hover></click>"
+    required-qq: "<yellow>- 绑定 QQ：</yellow><click:suggest_command:'/bind qq'><hover:show_text:'<gray>点击填充：/bind qq</gray>'><gold><bold>[绑定 QQ]</bold></gold></hover></click>"
+    not-authenticated: "<red>请先 /register 注册账号，或先 /login 登录。</red>"
     verifying: "<yellow>验证通过后即完成绑定。</yellow>"
-    not-authenticated: "<red>请先登录。</red>"
   unbind:
     usage: "<red>用法：/unbind <email|qq></red>"
     success: "<green>解绑成功。</green>"
     not-bound: "<red>你尚未绑定该类型。</red>"
+    required: "<red>该 {type} 绑定是登录所必需的，请先绑定其它渠道再解绑。</red>"
     verifying: "<yellow>请完成验证以确认解绑。</yellow>"
     not-authenticated: "<red>请先登录。</red>"
   forgot:
-    usage: "<red>用法：/forgot <账号></red>"
-    request-received: "<yellow>如果该账号存在，我们已准备好可用的找回方式。</yellow>"
-    no-binding: "<yellow>如果该账号存在，我们已准备好可用的找回方式。</yellow>"
+    usage: "<red>用法：/forgot <账号> [email|qq]</red>"
     choose-channel: "<yellow>请选择找回方式：/forgot <账号> {channels}</yellow>"
     invalid-channel: "<red>无效的找回方式。</red>"
     verified: "<green>验证成功，请设置新密码：/resetpassword <新密码> <确认密码></green>"
@@ -74,22 +81,34 @@ command:
   resetpassword:
     usage: "<red>用法：/resetpassword <新密码> <确认密码></red>"
     success: "<green>密码已重置，正在进入服务器…</green>"
+    binding-required: "<red>密码已重置，但该账号仍需先完成绑定才能登录。</red>"
     mismatch: "<red>两次输入的密码不一致，请重新 /forgot。</red>"
     no-grant: "<red>没有可用的重置授权，请先 /forgot <账号> <email|qq> 并完成验证。</red>"
+  deleteaccount:
+    request: "<yellow>注销账号 {account} 需要二次验证，请先完成验证。</yellow>"
+    no-binding: "<red>该账号未绑定邮箱或 QQ，无法完成二次验证；请先用 /bind 绑定一个渠道。</red>"
+    deleted: "<red>账号 {account} 已注销，感谢游玩。</red>"
   recover:
     new-password-prompt: "<yellow>验证成功，请输入新密码：/changepassword <旧密码> <新密码> 或使用管理命令重置。</yellow>"
     success: "<green>密码已重置，请重新登录。</green>"
 
 verification:
-  email-subject: "【{server}】验证码"
-  email-body: "你的验证码是：{code}\n\n{minutes} 分钟内有效，请勿泄露给他人。\n如果这不是你本人的操作，请忽略本邮件。"
-  email-sent: "<yellow>验证码已发送至 {email}，请在 {minutes} 分钟内输入：/verify <验证码></yellow>"
+  # 操作名称：用于 {action} 占位符，让邮件与提示能区分这次验证是注册 / 绑定 / 找回等
+  actions:
+    register: "注册"
+    bind-email: "邮箱绑定"
+    bind-qq: "QQ 绑定"
+    recover: "找回密码"
+    unbind: "解绑"
+    delete-account: "账号注销"
+  email-sent: "<yellow>「{action}」验证码已发送至 {email}，请在 {minutes} 分钟内完成验证：</yellow><click:suggest_command:'/verify '><hover:show_text:'<gray>点击填充 /verify</gray>'><gold><bold>[输入验证码]</bold></gold></hover></click>"
+  email-sent-bound: "<yellow>「{action}」验证码已发送至你绑定的邮箱，请在 {minutes} 分钟内完成验证：</yellow><click:suggest_command:'/verify '><hover:show_text:'<gray>点击填充 /verify</gray>'><gold><bold>[输入验证码]</bold></gold></hover></click>"
   email-sending: "<yellow>正在发送验证码，请稍候…</yellow>"
   email-failed: "<red>验证码发送失败，请联系管理员。</red>"
   email-unavailable: "<red>邮箱服务当前不可用。</red>"
-  qq-instruction: "<yellow>请在 QQ 群 {group} 发送以下验证码（点击可复制）：</yellow>"
+  qq-instruction: "<yellow>「{action}」请在 {channels} 发送下面的验证码（点一下即可复制）：</yellow>"
   qq-unavailable: "<red>QQ 验证服务当前不可用。</red>"
-  code-line: "<gold><bold>    {code}</bold></gold>"
+  code-line: "<click:copy_to_clipboard:'{code}'><hover:show_text:'<gray>点击复制验证码</gray>'><gold><bold>  [ {code} ]</bold></gold></hover></click>"
   code-prompt: "<yellow>发送后请等待验证结果，无需在游戏内输入。</yellow>"
   cancel-usage: "<red>用法：/verify <验证码> 或 /verify cancel</red>"
   cancelled: "<yellow>验证已取消。</yellow>"
@@ -105,7 +124,7 @@ verification:
   qq-matched: "<green>已收到群消息验证。</green>"
 
 auth:
-  login-required: "<red>请先登录后再进行该操作。</red>"
+  login-required: "<red>请先登录后再进行该操作。</red> <click:suggest_command:'/login '><hover:show_text:'<gray>点击填充 /login</gray>'><gold>[登录]</gold></hover></click>"
   kick-login-required: "<red>请先登录。</red>"
   session-restored: "<green>已通过会话保持自动登录。</green>"
   authenticated: "<green>身份验证通过。</green>"
@@ -116,7 +135,10 @@ auth:
   login-disconnect: "<green>登录成功，请重新连接。</green>"
 
 routing:
-  joining-login: "<yellow>请先登录：/login <账号> <密码> 或 /register <账号> <密码></yellow>"
+  joining-login: "<yellow>请先登录或注册：</yellow> <click:suggest_command:'/login '><hover:show_text:'<gray>点击填充：/login 【账号】 【密码】</gray>'><gold><bold>[登录]</bold></gold></hover></click> <click:suggest_command:'/register '><hover:show_text:'<gray>点击填充：/register 【账号】 【密码】 【确认密码】</gray>'><green><bold>[注册]</bold></green></hover></click> <click:suggest_command:'/forgot '><hover:show_text:'<gray>点击填充：/forgot 【账号】 【email|qq】</gray>'><aqua><bold>[忘记密码]</bold></aqua></hover></click>"
+  joining-login-usage-login: "<gray>登录：</gray><white>/login <账号> <密码></white>"
+  joining-login-usage-register: "<gray>注册：</gray><white>/register <账号> <密码> <确认密码></white>"
+  joining-login-usage-forgot: "<gray>忘记密码：</gray><white>/forgot <账号> <email|qq></white>"
   joining-default: "<gray>正在进入 {server}…</gray>"
   joining-last: "<gray>正在回到上次所在的服务器 {server}…</gray>"
   not-allowed: "<red>你无权进入该服务器。</red>"

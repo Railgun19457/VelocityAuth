@@ -32,7 +32,7 @@ public final class LogoutCommand extends PlayerCommandSupport {
             String ip = session.ip();
             plugin.async().run(() -> {
                 try {
-                    plugin.storage().sessions().deleteByAccountId(accountId);
+                    plugin.authService().clearSessions(accountId);
                     plugin.storage().audit().log(
                             io.github.railgun19457.velocityauth.auth.AuthService.nowSeconds(),
                             accountId, AuditEntry.LOGOUT, ip, "command");
@@ -46,6 +46,6 @@ public final class LogoutCommand extends PlayerCommandSupport {
 
     @Override
     public boolean hasPermission(Invocation invocation) {
-        return invocation.source() instanceof Player;
+        return availableWhenAuthenticated(invocation);
     }
 }

@@ -21,6 +21,15 @@ public final class AuthSession {
     private volatile long authenticatedAt;
     private volatile Player player;
 
+    /**
+     * 「注册后必须绑定」场景下，放行本连接对某个账号执行 {@code /bind} 的凭据。
+     * <p>
+     * 只有两种来源：本连接刚注册的账号，或本连接通过密码校验但被绑定要求拦下的账号。
+     * 避免仅凭「连接名匹配」就能给他人账号绑定邮箱/QQ（那会导致通过找回流程接管账号）。
+     * 0 表示未放行。
+     */
+    private volatile long bindingUnlockAccountId;
+
     public AuthSession(String connectionName, String ip) {
         this.connectionName = connectionName;
         this.connectionNameLower = connectionName == null ? "" : connectionName.toLowerCase(java.util.Locale.ROOT);
@@ -91,7 +100,12 @@ public final class AuthSession {
         this.authenticatedAt = 0L;
     }
 
-    public String displayName() {
-        return account != null ? account.name() : connectionName;
+    /** 放行本连接对该账号的预登录 {@code /bind}（见 {@link #preLoginBindingAllowed}）。 */
+    public void allowPreLoginBinding(long accountId) {
+        this.bindingUnlockAccountId = accountId;
+    }
+
+    public boolean preLoginBindingAllowed(long accountId) {
+        return accountId != 0L && bindingUnlockAccountId == accountId;
     }
 }

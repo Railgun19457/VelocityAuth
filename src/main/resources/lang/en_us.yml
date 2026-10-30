@@ -1,3 +1,4 @@
+# version: 1
 # ============ VelocityAuth English language file ============
 # Text uses MiniMessage syntax; {xxx} are placeholders.
 prefix: "<gold>[Auth]</gold> "
@@ -22,18 +23,19 @@ command:
     reconnect: "<green>Logged in. Please reconnect to enter the server.</green>"
     rate-limited: "<red>Too many attempts, please try again later.</red>"
     locked: "<red>This account is locked. Please contact an administrator.</red>"
+    binding-required: "<red>Password is correct, but this account must complete binding before it can log in.</red>"
   register:
-    usage: "<red>Usage: /register <account> <password> [confirm password]</red>"
+    usage: "<red>Usage: /register <account> <password> <confirm password></red>"
     success: "<green>Registered, entering the server…</green>"
+    success-pending: "<green>Registration succeeded!</green> <yellow>Account {account} must complete binding before it can log in.</yellow>"
     name-taken: "<red>That account name is already taken.</red>"
     name-invalid: "<red>Invalid account name: length must be {min}-{max} and contain only letters, digits and underscores.</red>"
     password-too-short: "<red>Password too short, at least {min} characters.</red>"
     password-too-long: "<red>Password too long, at most {max} characters.</red>"
+    password-too-long-bytes: "<red>Password too long: at most {bytes} bytes after UTF-8 encoding (bcrypt limit), please shorten it.</red>"
     password-mismatch: "<red>The two passwords do not match.</red>"
     already-registered: "<red>You are already registered or logged in.</red>"
     rate-limited: "<red>Too many registrations, please try again later.</red>"
-    gate-email: "<yellow>This server requires email verification. Please bind an email before registering.</yellow>"
-    gate-qq: "<yellow>This server requires QQ verification. Please bind QQ before registering.</yellow>"
   logout:
     success: "<yellow>Logged out. Please reconnect.</yellow>"
     not-authenticated: "<red>You are not logged in.</red>"
@@ -49,24 +51,29 @@ command:
   bind:
     usage: "<red>Usage: /bind <email|qq> [value]</red>"
     email-usage: "<red>Usage: /bind email <address></red>"
+    email-domains-allow: "<gray>Supported email domains: {domains}</gray>"
+    email-domains-deny: "<gray>Blocked email domains: {domains}</gray>"
+    email-domains-any: "<gray>Any email domain is allowed.</gray>"
     email-invalid: "<red>Invalid email address.</red>"
     domain-not-allowed: "<red>That email domain is not allowed.</red>"
     email-limit: "<red>This email has reached the maximum number of bound accounts.</red>"
     qq-limit: "<red>This QQ has reached the maximum number of bound accounts.</red>"
     already-bound: "<red>You have already bound this type.</red>"
     success: "<green>Bound successfully.</green>"
+    activated: "<green>Bound successfully, account activated, entering the server…</green>"
+    required-email: "<yellow>- Bind email:</yellow> <click:suggest_command:'/bind email '><hover:show_text:'<gray>Click to fill: /bind email [address]</gray>'><gold><bold>[Bind email]</bold></gold></hover></click>"
+    required-qq: "<yellow>- Bind QQ:</yellow> <click:suggest_command:'/bind qq'><hover:show_text:'<gray>Click to fill: /bind qq</gray>'><gold><bold>[Bind QQ]</bold></gold></hover></click>"
+    not-authenticated: "<red>Please /register first, or /login.</red>"
     verifying: "<yellow>The binding completes once verification succeeds.</yellow>"
-    not-authenticated: "<red>Please log in first.</red>"
   unbind:
     usage: "<red>Usage: /unbind <email|qq></red>"
     success: "<green>Unbound successfully.</green>"
     not-bound: "<red>You have not bound this type.</red>"
+    required: "<red>This {type} binding is required for logging in. Bind another channel before unbinding it.</red>"
     verifying: "<yellow>Complete verification to confirm unbinding.</yellow>"
     not-authenticated: "<red>Please log in first.</red>"
   forgot:
-    usage: "<red>Usage: /forgot <account></red>"
-    request-received: "<yellow>If that account exists, recovery options are ready.</yellow>"
-    no-binding: "<yellow>If that account exists, recovery options are ready.</yellow>"
+    usage: "<red>Usage: /forgot <account> [email|qq]</red>"
     choose-channel: "<yellow>Choose a recovery method: /forgot <account> {channels}</yellow>"
     invalid-channel: "<red>Invalid recovery method.</red>"
     verified: "<green>Verified. Set a new password: /resetpassword <new password> <confirm></green>"
@@ -74,22 +81,34 @@ command:
   resetpassword:
     usage: "<red>Usage: /resetpassword <new password> <confirm></red>"
     success: "<green>Password reset, entering the server…</green>"
+    binding-required: "<red>Password was reset, but this account must still complete binding before it can log in.</red>"
     mismatch: "<red>The two passwords do not match, please run /forgot again.</red>"
     no-grant: "<red>No valid reset grant. Run /forgot <account> <email|qq> and complete verification first.</red>"
+  deleteaccount:
+    request: "<yellow>Deleting account {account} requires secondary verification, please verify first.</yellow>"
+    no-binding: "<red>This account has no email or QQ binding, so secondary verification is impossible. Bind a channel with /bind first.</red>"
+    deleted: "<red>Account {account} has been deleted. Thanks for playing.</red>"
   recover:
     new-password-prompt: "<yellow>Verified. Set a new password with /changepassword <old> <new> or via an admin command.</yellow>"
     success: "<green>Password reset. Please log in again.</green>"
 
 verification:
-  email-subject: "[{server}] Verification code"
-  email-body: "Your verification code is: {code}\n\nIt is valid for {minutes} minutes. Do not share it with anyone.\nIf you did not request this, please ignore this email."
-  email-sent: "<yellow>A verification code was sent to {email}, enter it within {minutes} minutes: /verify <code></yellow>"
+  # 操作名称：用于 {action} 占位符，让邮件与提示能区分这次验证是注册 / 绑定 / 找回等
+  actions:
+    register: "Registration"
+    bind-email: "Email binding"
+    bind-qq: "QQ binding"
+    recover: "Password recovery"
+    unbind: "Unbinding"
+    delete-account: "Account deletion"
+  email-sent: "<yellow>[{action}] A verification code was sent to {email}, complete it within {minutes} minutes:</yellow> <click:suggest_command:'/verify '><hover:show_text:'<gray>Click to fill /verify</gray>'><gold><bold>[Enter code]</bold></gold></hover></click>"
+  email-sent-bound: "<yellow>[{action}] A verification code was sent to your bound email, complete it within {minutes} minutes:</yellow> <click:suggest_command:'/verify '><hover:show_text:'<gray>Click to fill /verify</gray>'><gold><bold>[Enter code]</bold></gold></hover></click>"
   email-sending: "<yellow>Sending the verification code, please wait…</yellow>"
   email-failed: "<red>Failed to send the verification code, please contact an administrator.</red>"
   email-unavailable: "<red>Email service is currently unavailable.</red>"
-  qq-instruction: "<yellow>Please send the following code in QQ group {group} (click to copy):</yellow>"
+  qq-instruction: "<yellow>[{action}] Please send the code below in {channels} (click to copy):</yellow>"
   qq-unavailable: "<red>QQ verification service is currently unavailable.</red>"
-  code-line: "<gold><bold>    {code}</bold></gold>"
+  code-line: "<click:copy_to_clipboard:'{code}'><hover:show_text:'<gray>Click to copy the code</gray>'><gold><bold>  [ {code} ]</bold></gold></hover></click>"
   code-prompt: "<yellow>Wait for the verification result after sending, no in-game input needed.</yellow>"
   cancel-usage: "<red>Usage: /verify <code> or /verify cancel</red>"
   cancelled: "<yellow>Verification cancelled.</yellow>"
@@ -105,7 +124,7 @@ verification:
   qq-matched: "<green>Group message verification received.</green>"
 
 auth:
-  login-required: "<red>Please log in before doing that.</red>"
+  login-required: "<red>Please log in before doing that.</red> <click:suggest_command:'/login '><hover:show_text:'<gray>Click to fill /login</gray>'><gold>[Login]</gold></hover></click>"
   kick-login-required: "<red>Please log in.</red>"
   session-restored: "<green>Automatically logged in via session persistence.</green>"
   authenticated: "<green>Authentication successful.</green>"
@@ -116,7 +135,10 @@ auth:
   login-disconnect: "<green>Logged in, please reconnect.</green>"
 
 routing:
-  joining-login: "<yellow>Please log in: /login <account> <password> or /register <account> <password></yellow>"
+  joining-login: "<yellow>Please log in or register:</yellow> <click:suggest_command:'/login '><hover:show_text:'<gray>Click to fill: /login [account] [password]</gray>'><gold><bold>[Login]</bold></gold></hover></click> <click:suggest_command:'/register '><hover:show_text:'<gray>Click to fill: /register [account] [password] [confirm password]</gray>'><green><bold>[Register]</bold></green></hover></click> <click:suggest_command:'/forgot '><hover:show_text:'<gray>Click to fill: /forgot [account] [email|qq]</gray>'><aqua><bold>[Forgot password]</bold></aqua></hover></click>"
+  joining-login-usage-login: "<gray>Login: </gray><white>/login <account> <password></white>"
+  joining-login-usage-register: "<gray>Register: </gray><white>/register <account> <password> <confirm password></white>"
+  joining-login-usage-forgot: "<gray>Forgot password: </gray><white>/forgot <account> <email|qq></white>"
   joining-default: "<gray>Entering {server}…</gray>"
   joining-last: "<gray>Returning to your last server {server}…</gray>"
   not-allowed: "<red>You are not allowed to join that server.</red>"

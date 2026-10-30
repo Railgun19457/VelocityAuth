@@ -19,7 +19,6 @@ public final class ProtocolException extends RuntimeException {
     // ---- 错误码常量 ----
     public static final String PAIRING_MISSING = "pairing_missing";
     public static final String PAIRING_EXPIRED = "pairing_expired";
-    public static final String PAIRING_USED = "pairing_used";
     public static final String PAIRING_ATTEMPTS_EXCEEDED = "pairing_attempts_exceeded";
     public static final String SIGNATURE_INVALID = "signature_invalid";
     public static final String KEY_NOT_PAIRED = "key_not_paired";

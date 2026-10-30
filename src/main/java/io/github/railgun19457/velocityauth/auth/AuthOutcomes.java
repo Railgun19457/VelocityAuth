@@ -14,6 +14,8 @@ public final class AuthOutcomes {
         SUCCESS,
         WRONG_PASSWORD,
         LOCKED,
+        /** 密码正确，但账号未满足「注册后必须绑定」的要求。 */
+        BINDING_REQUIRED,
         RATE_LIMITED,
         ERROR
     }
@@ -26,6 +28,11 @@ public final class AuthOutcomes {
         public static Login failure(LoginStatus status) {
             return new Login(status, null);
         }
+
+        /** 需要先完成绑定：带上账号，便于提示并放行 `/bind`。 */
+        public static Login bindingRequired(Account account) {
+            return new Login(LoginStatus.BINDING_REQUIRED, account);
+        }
     }
 
     public enum RegisterStatus {
@@ -34,8 +41,8 @@ public final class AuthOutcomes {
         NAME_INVALID,
         PASSWORD_TOO_SHORT,
         PASSWORD_TOO_LONG,
+        PASSWORD_TOO_LONG_BYTES,
         PASSWORD_MISMATCH,
-        GATE_REQUIRED,
         RATE_LIMITED,
         EMAIL_INVALID,
         DOMAIN_NOT_ALLOWED,
@@ -47,17 +54,13 @@ public final class AuthOutcomes {
         ERROR
     }
 
-    public record Register(RegisterStatus status, Account account, String gate) {
+    public record Register(RegisterStatus status, Account account) {
         public static Register success(Account account) {
-            return new Register(RegisterStatus.SUCCESS, account, null);
+            return new Register(RegisterStatus.SUCCESS, account);
         }
 
         public static Register failure(RegisterStatus status) {
-            return new Register(status, null, null);
-        }
-
-        public static Register gate(String gate) {
-            return new Register(RegisterStatus.GATE_REQUIRED, null, gate);
+            return new Register(status, null);
         }
     }
 
@@ -67,6 +70,7 @@ public final class AuthOutcomes {
         SAME_AS_OLD,
         PASSWORD_TOO_SHORT,
         PASSWORD_TOO_LONG,
+        PASSWORD_TOO_LONG_BYTES,
         NOT_FOUND,
         ERROR
     }

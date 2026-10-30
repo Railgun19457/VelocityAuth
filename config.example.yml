@@ -1,15 +1,12 @@
-# ============ VelocityAuth 配置模板 ============
-# 本文件为默认模板（无任何真实凭据）。首次启动时会被释放到
-#   plugins/velocityauth/config.yml
-# 真实配置（SMTP 授权码、QQ 群号、数据库密码、已配对公钥等）只存在于服务器上，
-# 请勿提交到版本库。
+# ============ VelocityAuth 配置 ============
+# 修改后可用 /vauth reload 热重载（qqbot.* 除外，改动需重启代理）。
 
-language: zh_cn            # zh_cn | en_us
+language: zh_cn            # 语言：zh_cn | en_us；文案在 plugins/velocityauth/lang/<语言>.yml
 
 database:
   type: sqlite             # sqlite | mysql
   sqlite:
-    file: velocityauth.db
+    file: velocityauth.db  # 相对 plugins/velocityauth/
   mysql:
     host: 127.0.0.1
     port: 3306
@@ -18,84 +15,86 @@ database:
     password: ""
 
 servers:
-  login: lobby             # 登录服：未认证玩家停留的服务器
+  login: lobby             # 登录服：未认证玩家停留的服务器（必须是专用服）
   default: main            # 认证成功后默认进入的服务器
-  allowed:                 # 允许进入的子服（需为 Velocity 已注册的服务器名）
-    - main                 #   记忆功能只会在这份白名单内恢复
+  allowed:                 # 允许进入的子服白名单（需为 Velocity 已注册的服务器名）
+    - main
     - survival
-  remember-last: true      # 认证后自动回到上次退出时所在的子服
+  remember-last: true      # 认证后自动回到上次退出时所在的子服（只在 allowed 内恢复）
 
 auth:
   account-name:
     min-length: 3
     max-length: 16
-    pattern: "^[A-Za-z0-9_]+$"
-    case-insensitive: true
+    pattern: "^[A-Za-z0-9_]+$"       # 账号名正则；唯一性不区分大小写
   password:
     min-length: 6
-    max-length: 64
-  bcrypt-cost: 10
+    max-length: 64                   # bcrypt 只使用前 72 字节，多字节字符超出会被拒绝
+  bcrypt-cost: 10                    # 4-16，越大越慢越安全
   session:
-    enabled: false                   # 默认关闭：国内 NAT 普遍，同 IP 免密风险高
-    ttl-minutes: 30
-    bind-to-ip: true
+    enabled: false                   # 会话保持：同 IP 免密登录。默认关闭（国内 NAT 共享 IP 风险高）
+    ttl-minutes: 30                  # 会话有效期
+    bind-to-ip: true                 # 是否绑定 IP（关闭则换 IP 也能免密，风险更高）
   premium:
-    enabled: true
-    keep-real-uuid: true
-    require-password: false          # 正版玩家是否仍需 /login
-    name-conflict: first-come        # first-come | premium-priority
+    enabled: true                    # 是否启用正版分支
+    keep-real-uuid: true             # true=正版保留真实 Mojang UUID；false=重写为账号 UUID
+    require-password: true           # 正版玩家是否仍需 /login（false 则按名字直接免密进入）
+    name-conflict: first-come        # 正版名与已有账号名冲突时：first-come | premium-priority
   bedrock:
     auto-link: true                  # 基岩玩家认证成功后自动关联 Floodgate 身份
-                                     # （需 Floodgate 端启用 player-link；否则回退为改写 UUID）
+                                     #（需 Floodgate 端启用 player-link；否则回退为改写 UUID）
 
 registration:
-  gate: none                         # none | email | qq
+  require-binding: []        # 注册后必须完成的绑定渠道，玩家任选其一；空列表 = 无需绑定
+                             # 可选：[] | [email] | [qq] | [email, qq]
+  unbound-ttl-minutes: 30    # 注册后一直未绑定的账号，超过这么多分钟自动清除（0 = 不自动清除）
 
 binding:
   email:
     enabled: true
-    max-accounts-per-email: 1
+    max-accounts-per-email: 1        # 同一邮箱最多绑定几个账号
     domain:
-      mode: whitelist                # off | whitelist | blacklist
+      mode: whitelist                # off | whitelist | blacklist（按 @ 之后的域名精确匹配）
       list: ["qq.com"]
   qq:
     enabled: true
-    max-accounts-per-qq: 1
+    max-accounts-per-qq: 1           # 同一 QQ 最多绑定几个账号
 
 verification:
-  email-code-length: 6
-  qq-code-length: 6
-  ttl-seconds: 300
-  max-attempts: 5
+  email-code-length: 6               # 邮箱验证码位数
+  qq-code-length: 6                  # QQ 验证码位数
+  ttl-seconds: 300                   # 验证码有效期（秒）
+  max-attempts: 5                    # 单个验证码最多尝试次数
   rate-limit:
-    per-ip-per-minute: 5
-    per-account-per-minute: 3
+    per-ip-per-minute: 5             # 单 IP 每分钟最多发起几次验证
+    per-account-per-minute: 3        # 单账号每分钟最多发起几次验证
 
 smtp:
   enabled: false                     # 需要邮箱验证/找回时再开
   host: smtp.qq.com
   port: 465
-  ssl: true
+  ssl: true                          # 465 用 true；587 用 false（走 STARTTLS）
   username: ""                       # 你的邮箱，如 example@qq.com
-  password: ""                       # QQ 邮箱需填授权码，不是登录密码
-  from: "VelocityAuth <example@qq.com>"
-  timeout-seconds: 10
+  password: ""                       # QQ 邮箱填授权码，不是登录密码
+  from: "VelocityAuth <example@qq.com>"   # 发件人（多数邮箱要求与 username 一致）
+  timeout-seconds: 10                # 连接/发送超时
 
 qqbot:
   enabled: false                     # 需要 QQ 验证/绑定时再开
-  listen: "0.0.0.0"
-  port: 8765
-  group-id: ""                       # 验证用的 QQ 群号
-  require-group-member: true
+  listen: "0.0.0.0"                  # WebSocket 监听地址
+  port: 8765                         # WebSocket 监听端口
+  group-id: ""                       # 收码用的 QQ 群号
+  private-number: ""                 # 可选的 bot QQ 号，仅在提示里展示「也可私聊」时用
+  require-group-member: true         # 是否要求发码者是群成员
   pairing:
-    ttl-seconds: 600
-    max-attempts: 5
-    bootstrap-code: ""                 # 无控制台部署时可用：预置一次性配对码（只存内存，用后即弃）
+    ttl-seconds: 600                 # 配对码有效期
+    max-attempts: 5                  # 配对码最多尝试次数
+    bootstrap-code: ""               # 无控制台部署时可预置一次性配对码（只存内存，用后即弃）
 
 proxy:
-  address: ""                        # 代理对外地址（transferToHost 用），留空则用 bind 地址
+  address: ""                        # 代理对外地址，供 transferToHost 用；留空则用客户端连接时的地址
   port: 0                            # 0 表示使用 velocity.toml 的 bind 端口
 
 security:
   handshake-timeout-seconds: 10      # bot 握手超时
-  clock-skew-seconds: 120            # 握手帧时间偏差容忍
+  clock-skew-seconds: 120            # bot 握手帧允许的时间偏差

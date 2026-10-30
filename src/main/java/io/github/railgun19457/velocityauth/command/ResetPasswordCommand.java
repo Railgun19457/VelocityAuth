@@ -4,6 +4,7 @@ import com.velocitypowered.api.proxy.Player;
 import io.github.railgun19457.velocityauth.VelocityAuthPlugin;
 import io.github.railgun19457.velocityauth.auth.AuthOutcomes;
 import io.github.railgun19457.velocityauth.auth.AuthSessionRegistry;
+import io.github.railgun19457.velocityauth.auth.PasswordHasher;
 import io.github.railgun19457.velocityauth.config.VelocityAuthConfig;
 import io.github.railgun19457.velocityauth.storage.model.AuditEntry;
 
@@ -31,15 +32,9 @@ public final class ResetPasswordCommand extends PlayerCommandSupport {
             player.sendMessage(plugin.lang().msg("command.resetpassword.usage"));
             return;
         }
-        Optional<Long> grant = plugin.recovery().consumeGrant(player.getUniqueId());
-        if (grant.isEmpty()) {
-            player.sendMessage(plugin.lang().msg("command.resetpassword.no-grant"));
-            return;
-        }
-        long accountId = grant.get();
+        // 先校验密码，再消费授权：避免玩家手误（两次不一致/过短）白白丢掉一次 /forgot 的验证结果
         String newPassword = args[0];
         if (!newPassword.equals(args[1])) {
-            // 授权已消费，这里直接给出错误；玩家可重新 /forgot
             player.sendMessage(plugin.lang().msg("command.resetpassword.mismatch"));
             return;
         }
@@ -53,6 +48,18 @@ public final class ResetPasswordCommand extends PlayerCommandSupport {
             player.sendMessage(plugin.lang().msg("command.register.password-too-long", "max", rule.maxLength()));
             return;
         }
+        if (pwIssue == AuthOutcomes.RegisterStatus.PASSWORD_TOO_LONG_BYTES) {
+            player.sendMessage(plugin.lang().msg("command.register.password-too-long-bytes",
+                    "bytes", PasswordHasher.MAX_PASSWORD_BYTES));
+            return;
+        }
+
+        Optional<Long> grant = plugin.recovery().consumeGrant(player.getUniqueId());
+        if (grant.isEmpty()) {
+            player.sendMessage(plugin.lang().msg("command.resetpassword.no-grant"));
+            return;
+        }
+        long accountId = grant.get();
 
         var identity = identityOf(player);
         String ip = ipOf(player);
@@ -60,6 +67,18 @@ public final class ResetPasswordCommand extends PlayerCommandSupport {
                 .thenAccept(result -> {
                     if (result.status() != AuthOutcomes.ChangePasswordStatus.SUCCESS) {
                         player.sendMessage(plugin.lang().msg("generic.internal-error"));
+                        return;
+                    }
+                    // 重置密码同样属于"登录"，必须满足注册后必须绑定的要求，
+                    // 否则「只绑了非门槛渠道的账号」可以靠找回绕过绑定门槛
+                    var account = plugin.authService().cache().byId(accountId).orElse(null);
+                    if (account != null && !plugin.authService().bindingSatisfied(account)) {
+                        var session = sessionOf(player);
+                        if (session != null) {
+                            session.allowPreLoginBinding(accountId);
+                        }
+                        player.sendMessage(plugin.lang().msg("command.resetpassword.binding-required"));
+                        sendBindingRequirement(player);
                         return;
                     }
                     finishAuthAndReconnect(player, identity, ip, accountId,
@@ -74,6 +93,6 @@ public final class ResetPasswordCommand extends PlayerCommandSupport {
 
     @Override
     public boolean hasPermission(Invocation invocation) {
-        return true;
+        return availableWhenUnauthenticated(invocation);
     }
 }

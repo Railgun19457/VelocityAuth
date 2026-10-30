@@ -109,6 +109,22 @@ public final class ConfigNode {
     }
 
     /**
+     * 字符串列表；标量字符串视为单元素列表（方便写 {@code key: email}）。
+     * <p>
+     * 空字符串视为空列表，便于 {@code key: ""} 表示「关闭」。
+     */
+    public List<String> stringListOrScalar(String key, List<String> def) {
+        Object value = map.get(key);
+        if (value == null) {
+            return def;
+        }
+        if (value instanceof String s) {
+            return s.isBlank() ? List.of() : List.of(s);
+        }
+        return stringList(key, def);
+    }
+
+    /**
      * 读取枚举式取值（大小写与连字符不敏感），非法值抛出带候选列表的异常。
      */
     public String enumValue(String key, String def, String... allowed) {

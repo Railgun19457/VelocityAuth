@@ -4,8 +4,10 @@ import io.github.railgun19457.velocityauth.storage.Database.Dialect;
 import io.github.railgun19457.velocityauth.storage.model.Identity;
 import io.github.railgun19457.velocityauth.storage.model.IdentityKind;
 
+import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
+import java.sql.SQLException;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
@@ -50,7 +52,8 @@ public final class IdentityRepository {
         });
     }
 
-    public List<Identity> findByAccountId(long accountId) {        return database.withConnection(connection -> {
+    public List<Identity> findByAccountId(long accountId) {
+        return database.withConnection(connection -> {
             try (PreparedStatement ps = connection.prepareStatement(
                     "SELECT id, account_id, kind, identifier, first_seen, last_seen"
                             + " FROM identities WHERE account_id = ? ORDER BY last_seen DESC")) {
@@ -80,6 +83,15 @@ public final class IdentityRepository {
 
     /** 记录一次身份使用；已存在则更新 account_id 与 last_seen。 */
     public void upsert(long accountId, IdentityKind kind, String identifier, long now) {
+        database.inTransaction(connection -> {
+            upsert(connection, accountId, kind, identifier, now);
+            return null;
+        });
+    }
+
+    /** 在调用方提供的事务连接内 upsert 身份（供注册流程的原子写入使用）。 */
+    void upsert(Connection connection, long accountId, IdentityKind kind, String identifier, long now)
+            throws SQLException {
         String sql = database.dialect() == Dialect.MYSQL
                 ? "INSERT INTO identities (account_id, kind, identifier, first_seen, last_seen)"
                         + " VALUES (?, ?, ?, ?, ?)"
@@ -88,17 +100,14 @@ public final class IdentityRepository {
                         + " VALUES (?, ?, ?, ?, ?)"
                         + " ON CONFLICT(kind, identifier) DO UPDATE SET"
                         + " account_id = excluded.account_id, last_seen = excluded.last_seen";
-        database.inTransaction(connection -> {
-            try (PreparedStatement ps = connection.prepareStatement(sql)) {
-                ps.setLong(1, accountId);
-                ps.setString(2, kind.dbValue());
-                ps.setString(3, identifier);
-                ps.setLong(4, now);
-                ps.setLong(5, now);
-                ps.executeUpdate();
-            }
-            return null;
-        });
+        try (PreparedStatement ps = connection.prepareStatement(sql)) {
+            ps.setLong(1, accountId);
+            ps.setString(2, kind.dbValue());
+            ps.setString(3, identifier);
+            ps.setLong(4, now);
+            ps.setLong(5, now);
+            ps.executeUpdate();
+        }
     }
 
     public int delete(IdentityKind kind, String identifier) {

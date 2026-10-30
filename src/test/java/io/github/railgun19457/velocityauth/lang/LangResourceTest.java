@@ -1,6 +1,9 @@
 package io.github.railgun19457.velocityauth.lang;
 
 import io.github.railgun19457.velocityauth.VelocityAuthPlugin;
+import net.kyori.adventure.text.Component;
+import net.kyori.adventure.text.event.ClickEvent;
+import net.kyori.adventure.text.serializer.plain.PlainTextComponentSerializer;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
 import org.slf4j.helpers.NOPLogger;
@@ -54,11 +57,55 @@ class LangResourceTest {
         for (String key : new String[]{
                 "prefix",
                 "command.login.usage", "command.register.usage", "command.verify.usage",
-                "verification.email-subject", "verification.email-body",
+                "command.deleteaccount.request", "command.bind.email-domains-allow",
                 "verification.qq-instruction", "verification.wrong-code",
                 "auth.login-required", "routing.joining-login",
                 "admin.status.header"}) {
             assertTrue(zh.has(key), "缺少语言 key：" + key);
+        }
+    }
+
+    /**
+     * 提示里的 MiniMessage 点击事件必须真的被解析出来（而不是当字面量显示）。
+     * <p>
+     * 覆盖：入服提示的 [登录]/[注册] 填充按钮、QQ 验证码的点击复制（含占位符替换）。
+     */
+    @Test
+    void promptsCarryClickEvents() throws IOException {
+        LangService zh = LangService.load("zh_cn", VelocityAuthPlugin.class, null, NOPLogger.NOP_LOGGER);
+
+        Set<String> suggests = new LinkedHashSet<>();
+        collectClicks(zh.msg("routing.joining-login"), ClickEvent.Action.SUGGEST_COMMAND, suggests);
+        assertTrue(suggests.contains("/login "), "缺少 /login 填充按钮：" + suggests);
+        assertTrue(suggests.contains("/register "), "缺少 /register 填充按钮：" + suggests);
+
+        Set<String> binds = new LinkedHashSet<>();
+        collectClicks(zh.msg("command.bind.required-email"), ClickEvent.Action.SUGGEST_COMMAND, binds);
+        collectClicks(zh.msg("command.bind.required-qq", "group", "123456"),
+                ClickEvent.Action.SUGGEST_COMMAND, binds);
+        assertTrue(binds.contains("/bind email "), "缺少 /bind email 填充按钮：" + binds);
+        assertTrue(binds.contains("/bind qq"), "缺少 /bind qq 填充按钮：" + binds);
+
+        // 点击复制：占位符替换要作用到 click 的参数上
+        Set<String> copies = new LinkedHashSet<>();
+        collectClicks(zh.raw("verification.code-line", "code", "AbC123"),
+                ClickEvent.Action.COPY_TO_CLIPBOARD, copies);
+        assertEquals(Set.of("AbC123"), copies);
+
+        // 纯文本里不应残留未解析的标签（序列化回 MiniMessage 当然会带 <click>，所以看纯文本）
+        String plain = PlainTextComponentSerializer.plainText().serialize(zh.msg("routing.joining-login"));
+        assertFalse(plain.contains("click:"), plain);
+        assertTrue(plain.contains("[登录]"), plain);
+        assertTrue(plain.contains("[注册]"), plain);
+    }
+
+    private static void collectClicks(Component component, ClickEvent.Action action, Set<String> out) {
+        ClickEvent click = component.clickEvent();
+        if (click != null && click.action() == action && click.value() != null) {
+            out.add(click.value());
+        }
+        for (Component child : component.children()) {
+            collectClicks(child, action, out);
         }
     }
 

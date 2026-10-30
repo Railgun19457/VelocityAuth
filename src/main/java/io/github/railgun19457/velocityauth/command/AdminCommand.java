@@ -4,8 +4,8 @@ import com.velocitypowered.api.command.CommandSource;
 import com.velocitypowered.api.command.SimpleCommand;
 import com.velocitypowered.api.proxy.Player;
 import io.github.railgun19457.velocityauth.VelocityAuthPlugin;
-import io.github.railgun19457.velocityauth.auth.AuthOutcomes;
 import io.github.railgun19457.velocityauth.auth.AuthSession;
+import io.github.railgun19457.velocityauth.auth.PasswordHasher;
 import io.github.railgun19457.velocityauth.bot.KeyStore;
 import io.github.railgun19457.velocityauth.bot.PairingService;
 import io.github.railgun19457.velocityauth.storage.model.Account;
@@ -137,10 +137,19 @@ public final class AdminCommand implements SimpleCommand {
                     return;
                 }
                 plugin.authService().forcePassword(account.id(), args[3], ip, AuditEntry.CHANGE_PASSWORD)
-                        .thenAccept(result -> source.sendMessage(result.ok()
-                                ? plugin.lang().msg("admin.account.password-set", "account", account.name())
-                                : plugin.lang().msg("command.register.password-too-short", "min",
-                                plugin.config().auth().password().minLength())));
+                        .thenAccept(result -> source.sendMessage(switch (result.status()) {
+                            case SUCCESS -> plugin.lang().msg("admin.account.password-set",
+                                    "account", account.name());
+                            case PASSWORD_TOO_SHORT -> plugin.lang().msg("command.register.password-too-short",
+                                    "min", plugin.config().auth().password().minLength());
+                            case PASSWORD_TOO_LONG -> plugin.lang().msg("command.register.password-too-long",
+                                    "max", plugin.config().auth().password().maxLength());
+                            case PASSWORD_TOO_LONG_BYTES -> plugin.lang().msg(
+                                    "command.register.password-too-long-bytes",
+                                    "bytes", PasswordHasher.MAX_PASSWORD_BYTES);
+                            case NOT_FOUND, WRONG_PASSWORD, SAME_AS_OLD, ERROR ->
+                                    plugin.lang().msg("generic.internal-error");
+                        }));
             }
             case "unbind" -> {
                 if (args.length < 4) {
@@ -180,7 +189,7 @@ public final class AdminCommand implements SimpleCommand {
                 long accountId = account.id();
                 plugin.async().run(() -> {
                     plugin.storage().accounts().delete(accountId);
-                    plugin.authService().cache().remove(accountId);
+                    plugin.authService().forgetAccount(accountId);
                     plugin.storage().audit().log(
                             io.github.railgun19457.velocityauth.auth.AuthService.nowSeconds(), null,
                             "admin_delete", ip, "account=" + account.name() + " by=" + sourceName(source));
@@ -423,7 +432,7 @@ public final class AdminCommand implements SimpleCommand {
 
     @Override
     public boolean hasPermission(Invocation invocation) {
-        // 返回 true 让命令始终可执行，权限不足时由 execute 给出明确提示
-        return true;
+        // 同时作为命令节点的 requires 谓词：权限不足时该命令不出现在补全里，也无法执行
+        return invocation.source().hasPermission(PERMISSION);
     }
 }

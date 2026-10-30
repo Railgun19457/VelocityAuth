@@ -37,13 +37,13 @@ public final class Schema {
             }
             if (current == 0) {
                 createInitialSchema(connection, database.dialect());
-                writeVersion(connection, CURRENT_VERSION);
+                writeVersion(connection, database.dialect(), CURRENT_VERSION);
                 logger.info("[VelocityAuth] 已初始化数据库结构（schema v{}）", CURRENT_VERSION);
                 return null;
             }
             for (int version = current + 1; version <= CURRENT_VERSION; version++) {
                 applyMigration(connection, database.dialect(), version);
-                writeVersion(connection, version);
+                writeVersion(connection, database.dialect(), version);
                 logger.info("[VelocityAuth] 已应用数据库迁移 v{}", version);
             }
             return null;
@@ -77,13 +77,12 @@ public final class Schema {
         return 0;
     }
 
-    private static void writeVersion(Connection connection, int version) throws SQLException {
-        String sql = switch (connection.getMetaData().getDatabaseProductName().toLowerCase()) {
-            case "mysql" -> "INSERT INTO `va_meta` (`key`, `value`) VALUES (?, ?)"
-                    + " ON DUPLICATE KEY UPDATE `value` = VALUES(`value`)";
-            default -> "INSERT INTO va_meta (key, value) VALUES (?, ?)"
-                    + " ON CONFLICT(key) DO UPDATE SET value = excluded.value";
-        };
+    private static void writeVersion(Connection connection, Dialect dialect, int version) throws SQLException {
+        String sql = dialect == Dialect.MYSQL
+                ? "INSERT INTO `va_meta` (`key`, `value`) VALUES (?, ?)"
+                        + " ON DUPLICATE KEY UPDATE `value` = VALUES(`value`)"
+                : "INSERT INTO va_meta (key, value) VALUES (?, ?)"
+                        + " ON CONFLICT(key) DO UPDATE SET value = excluded.value";
         try (PreparedStatement ps = connection.prepareStatement(sql)) {
             ps.setString(1, "schema_version");
             ps.setString(2, Integer.toString(version));

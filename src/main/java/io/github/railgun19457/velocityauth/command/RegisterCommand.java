@@ -3,15 +3,23 @@ package io.github.railgun19457.velocityauth.command;
 import com.velocitypowered.api.proxy.Player;
 import io.github.railgun19457.velocityauth.VelocityAuthPlugin;
 import io.github.railgun19457.velocityauth.auth.AuthOutcomes;
+import io.github.railgun19457.velocityauth.auth.AuthSession;
 import io.github.railgun19457.velocityauth.auth.AuthSessionRegistry;
-import io.github.railgun19457.velocityauth.auth.RegistrationFlow;
+import io.github.railgun19457.velocityauth.auth.IdentityResolver;
+import io.github.railgun19457.velocityauth.auth.PasswordHasher;
 import io.github.railgun19457.velocityauth.config.VelocityAuthConfig;
-import io.github.railgun19457.velocityauth.verify.VerificationChannel;
+import io.github.railgun19457.velocityauth.storage.model.Account;
 
 /**
- * {@code /register <账号> <密码> [确认密码]}
+ * {@code /register <账号> <密码> <确认密码>}
  * <p>
- * 当 {@code registration.gate = email} 时为 {@code /register <账号> <密码> <邮箱> [确认密码]}（见 ADR-11）。
+ * 三个参数都必填。账号先落库：
+ * <ul>
+ *   <li>未配置 {@code registration.require-binding}：直接 {@code active}，注册即自动登录；</li>
+ *   <li>配置了要求：先落为 {@code pending_binding}，提示玩家任选一个渠道
+ *       {@code /bind email <邮箱>} 或 {@code /bind qq} 完成绑定；绑定成功才激活并自动登录。
+ *       超时未绑定的账号会被自动清除（{@code registration.unbound-ttl-minutes}）。</li>
+ * </ul>
  */
 public final class RegisterCommand extends PlayerCommandSupport {
 
@@ -26,22 +34,15 @@ public final class RegisterCommand extends PlayerCommandSupport {
             return;
         }
         VelocityAuthConfig cfg = plugin.config();
-        VelocityAuthConfig.Registration.Gate gate = cfg.registration().gate();
-        boolean emailGate = gate == VelocityAuthConfig.Registration.Gate.EMAIL;
-        boolean qqGate = gate == VelocityAuthConfig.Registration.Gate.QQ;
 
         String[] args = invocation.arguments();
-        int required = emailGate ? 3 : 2;
-        if (args.length < required) {
+        if (args.length < 3) {
             player.sendMessage(plugin.lang().msg("command.register.usage"));
             return;
         }
         String name = args[0];
         String password = args[1];
-        String email = emailGate ? args[2] : null;
-        String confirm = emailGate
-                ? (args.length >= 4 ? args[3] : null)
-                : (args.length >= 3 ? args[2] : null);
+        String confirm = args[2];
 
         // 快速前置校验（不碰 DB）
         VelocityAuthConfig.AccountName nameRule = cfg.auth().accountName();
@@ -60,30 +61,21 @@ public final class RegisterCommand extends PlayerCommandSupport {
             player.sendMessage(plugin.lang().msg("command.register.password-too-long", "max", pwRule.maxLength()));
             return;
         }
-        if (confirm != null && !password.equals(confirm)) {
+        if (pwIssue == AuthOutcomes.RegisterStatus.PASSWORD_TOO_LONG_BYTES) {
+            player.sendMessage(plugin.lang().msg("command.register.password-too-long-bytes",
+                    "bytes", PasswordHasher.MAX_PASSWORD_BYTES));
+            return;
+        }
+        if (confirm == null || !password.equals(confirm)) {
             player.sendMessage(plugin.lang().msg("command.register.password-mismatch"));
             return;
         }
 
-        var identity = identityOf(player);
+        IdentityResolver.Resolved identity = identityOf(player);
         String ip = ipOf(player);
 
-        if (!emailGate && !qqGate) {
-            plugin.authService().register(name, password, confirm, identity, ip)
-                    .thenAccept(result -> handle(player, identity, ip, result))
-                    .exceptionally(throwable -> {
-                        plugin.log().error("注册命令异常", throwable);
-                        player.sendMessage(plugin.lang().msg("generic.internal-error"));
-                        return null;
-                    });
-            return;
-        }
-
-        plugin.registrationFlow()
-                .begin(new RegistrationFlow.Request(player.getUniqueId(), name, password, email,
-                        identity, ip,
-                        VerificationPrompts.dispatchHandler(plugin, player, email)))
-                .thenAccept(started -> handleGated(player, identity, ip, started))
+        plugin.authService().register(name, password, confirm, identity, ip)
+                .thenAccept(result -> handle(player, identity, ip, result))
                 .exceptionally(throwable -> {
                     plugin.log().error("注册命令异常", throwable);
                     player.sendMessage(plugin.lang().msg("generic.internal-error"));
@@ -91,34 +83,28 @@ public final class RegisterCommand extends PlayerCommandSupport {
                 });
     }
 
-    private void handleGated(Player player, io.github.railgun19457.velocityauth.auth.IdentityResolver.Resolved identity, String ip,
-                             RegistrationFlow.Started started) {
-        if (!started.accepted()) {
-            if (!started.notified()) {
-                player.sendMessage(messageFor(started.error()));
-            }
+    private void handle(Player player, IdentityResolver.Resolved identity, String ip,
+                        AuthOutcomes.Register result) {
+        if (result.status() != AuthOutcomes.RegisterStatus.SUCCESS) {
+            player.sendMessage(messageFor(result.status()));
             return;
         }
-        if (started.channel() == VerificationChannel.QQ) {
-            VerificationPrompts.sendQqInstruction(plugin, player, started.session().code());
-        }
-        started.completion().thenAccept(result -> {
-            if (result.status() == AuthOutcomes.RegisterStatus.SUCCESS) {
-                finishAuthAndReconnect(player, identity, ip, result.account().id(),
-                        plugin.lang().msg("command.register.success"));
-            } else {
-                player.sendMessage(messageFor(result.status()));
-            }
-        });
-    }
+        Account account = result.account();
 
-    private void handle(Player player, io.github.railgun19457.velocityauth.auth.IdentityResolver.Resolved identity, String ip, AuthOutcomes.Register result) {
-        if (result.status() == AuthOutcomes.RegisterStatus.SUCCESS) {
-            finishAuthAndReconnect(player, identity, ip, result.account().id(),
+        // 无需绑定：注册即登录
+        if (!plugin.config().registration().bindingRequired()) {
+            finishAuthAndReconnect(player, identity, ip, account.id(),
                     plugin.lang().msg("command.register.success"));
             return;
         }
-        player.sendMessage(messageFor(result.status()));
+
+        // 需要绑定：先通知注册成功，再提示绑定渠道；放行本连接的 /bind
+        AuthSession session = sessionOf(player);
+        if (session != null) {
+            session.allowPreLoginBinding(account.id());
+        }
+        player.sendMessage(plugin.lang().msg("command.register.success-pending", "account", account.name()));
+        sendBindingRequirement(player);
     }
 
     private net.kyori.adventure.text.Component messageFor(AuthOutcomes.RegisterStatus status) {
@@ -131,22 +117,24 @@ public final class RegisterCommand extends PlayerCommandSupport {
                     "min", cfg.auth().password().minLength());
             case PASSWORD_TOO_LONG -> plugin.lang().msg("command.register.password-too-long",
                     "max", cfg.auth().password().maxLength());
+            case PASSWORD_TOO_LONG_BYTES -> plugin.lang().msg("command.register.password-too-long-bytes",
+                    "bytes", PasswordHasher.MAX_PASSWORD_BYTES);
             case PASSWORD_MISMATCH -> plugin.lang().msg("command.register.password-mismatch");
+            case RATE_LIMITED -> plugin.lang().msg("command.register.rate-limited");
+            case SUCCESS, ERROR -> plugin.lang().msg("generic.internal-error");
+            // 以下状态不再由注册路径产生，保留兜底以免漏配
             case EMAIL_INVALID -> plugin.lang().msg("command.bind.email-invalid");
             case DOMAIN_NOT_ALLOWED -> plugin.lang().msg("command.bind.domain-not-allowed");
             case EMAIL_LIMIT -> plugin.lang().msg("command.bind.email-limit");
             case QQ_LIMIT -> plugin.lang().msg("command.bind.qq-limit");
-            case RATE_LIMITED -> plugin.lang().msg("command.register.rate-limited");
             case VERIFICATION_CANCELLED -> plugin.lang().msg("verification.cancelled");
             case VERIFICATION_EXPIRED -> plugin.lang().msg("verification.expired");
             case VERIFICATION_FAILED -> plugin.lang().msg("generic.internal-error");
-            case GATE_REQUIRED -> plugin.lang().msg("generic.feature-disabled");
-            case SUCCESS, ERROR -> plugin.lang().msg("generic.internal-error");
         };
     }
 
     @Override
     public boolean hasPermission(Invocation invocation) {
-        return invocation.source() instanceof Player;
+        return availableWhenUnauthenticated(invocation);
     }
 }
