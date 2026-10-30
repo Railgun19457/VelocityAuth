@@ -30,7 +30,7 @@
 | 项 | 约定 |
 |---|---|
 | 传输 | WebSocket |
-| **服务端** | **Velocity 插件**（监听 `qqbot.listen:port`） |
+| **服务端** | **Velocity 插件**（监听 `bot.listen:port`） |
 | **客户端** | **bot**（主动连接、断线自动重连） |
 | 帧格式 | 一个 WebSocket **文本帧** = 一个 JSON 对象 |
 | 字符编码 | UTF-8 |
@@ -137,10 +137,11 @@ code=<配对码>\n        ← 仅 context=pair 时存在；context=auth 时该�
    | 字段 | 说明 |
    |---|---|
    | `pairing_id` | 公开标识 |
-   | `code` | 高熵配对码（≥128 bit，base64url），**只打印一次** |
+   | `code` | 高熵配对码（24 随机字节 → base64url，约 192 bit），**只打印一次** |
    | `expires_at` | 默认 TTL 600 秒 |
-   | `attempts` | 失败次数，上限 5 |
-   | `used` | 是否已消费 |
+   | `attempts` / `max_attempts` | 失败次数 / 上限（默认 5） |
+
+   记录**只存内存**；配对成功（或失败超限 / 过期）后即被移除，之后再查视为不存在。
 
 3. 服主把 `pairing_id` 与 `code` 配置到 bot 侧
 
@@ -154,6 +155,8 @@ code=<配对码>\n        ← 仅 context=pair 时存在；context=auth 时该�
 | `client_id` | string | bot 实例标识，如 `astrbot-1` |
 | `client_key_id` | string | bot 密钥标识 |
 | `client_public_key` | string | b64url，**裸 Ed25519 公钥（32 字节）** |
+| `provider` | string | 该 bot 服务的渠道 id（如 `qq` / `discord`），用于插件按渠道路由 |
+| `scopes` | string | 可选的监听位置展示串（如群号，`,` 连接），仅用于提示 |
 | `capabilities` | string[] | 如 `["verify.v1"]` |
 
 `sig`：bot 用**自己的** Ed25519 私钥签名（证明持有该公钥）。
@@ -226,6 +229,8 @@ plugin 返回 `error`（`kind:"plain"`，`type:"error"`）并关闭连接。错�
 | `client_public_key_sha256` | string | 与 pin 记录一致，否则拒绝 |
 | `client_ephemeral_key` | string | b64url 裸 X25519 公钥（32B），**每次连接新生成** |
 | `client_nonce` | string | b64url 16B |
+| `provider` | string | 该 bot 服务的渠道 id（同 `pair.hello`） |
+| `scopes` | string | 可选的监听位置展示串 |
 | `capabilities` | string[] | |
 
 `sig`：bot 用长期 Ed25519 私钥签名。
@@ -322,33 +327,98 @@ ts=<时间戳>\n
 
 ## 8. 业务消息
 
-均为密封帧。`id` 用于请求/响应关联。
+均为密封帧。内层明文里的 `id` 是本帧的唯一标识（每帧都不同），**不是**请求 id；
+请求与响应按业务字段关联：`verify.*` 用 `code`，`query.*` 用响应回带的 `request_id`。
+
+> **注意**：密封帧内层是 canonical 文本（第 7 节），因此**接收方解析出的所有 payload 值都是字符串**
+> ——布尔是 `"true"`/`"false"`，整数是十进制文本，字符串数组是**逗号连接**的字符串。下文凡标注
+> `(int)` / `(bool)` 的字段，接收方拿到的是其字符串形式。
 
 | 消息 | 方向 | payload 字段 | 说明 |
 |---|---|---|---|
-| `verify.watch` | plugin → bot | `code`(string), `group_id`(string), `ttl`(int) | 登记一个待验证码，TTL 内该群出现此码即视为验证 |
+| `verify.watch` | plugin → bot | `code`(string), `ttl`(int), `provider`(string) | 登记一个待验证码，TTL 内该渠道出现此码即视为验证（插件只发给该 provider 的会话） |
 | `verify.watch.ack` | bot → plugin | `code`, `accepted`(bool) | bot 确认已登记（或拒绝） |
-| `verify.matched` | bot → plugin | `code`, `qq`(string), `group_id`, `group_nick`(string), `is_group_member`(bool), `matched_at`(int) | bot 命中：已通过群成员校验 |
+| `verify.matched` | bot → plugin | `code`, `subject`(string), `scope`(string, 可选), `display_name`(string, 可选), `matched_at`(int) | bot 命中：**平台策略（成员/角色等）已由 bot 判定有效**，故只回事实 |
 | `verify.matched.ack` | plugin → bot | `code`, `consumed`(bool) | plugin 已消费；bot 收到后可撤回群消息 |
 | `verify.cancel` | plugin → bot | `code` | 会话取消/超时，bot 应停止监听 |
+| `query.account` | bot → plugin | `by`(string), `value`(string) | 按 `name`\|`uuid` 查询账号详情（`query.v1`） |
+| `query.account.result` | plugin → bot | 见 8.1 | 账号详情（`found=false` 表示不存在） |
+| `query.lookup` | bot → plugin | `by`(string), `value`(string), `limit`(int, 可选) | 按 `ip` 或渠道 id 反查账号名列表（`query.v1`） |
+| `query.lookup.result` | plugin → bot | `found`, `by`, `value`, `count`(int), `accounts`(string, `,` 分隔) | 命中的账号名（去重） |
+| `query.history` | bot → plugin | `by`(string), `value`(string), `result`(string, 可选), `since`(int, 可选), `limit`(int, 可选) | 按 `name`\|`uuid` 查询登录历史（`query.v1`） |
+| `query.history.result` | plugin → bot | `found`, `count`(int), `entries`(string, `;` 分隔) | 每条 `at\|result\|ip\|identity`，时间倒序 |
+| `query.binding-history` | bot → plugin | `by`(string), `value`(string), `limit`(int, 可选) | 按渠道 id 查绑定历史（含解绑/注销）（`query.v1`） |
+| `query.binding-history.result` | plugin → bot | `found`, `by`, `value`, `count`(int), `entries`(string, `;` 分隔), `cooldown_until`(int) | 每条 `at\|action\|ip\|account_id\|account`，时间倒序 |
+| `query.stats` | bot → plugin | — | 聚合统计（`query.v1`） |
+| `query.stats.result` | plugin → bot | 见 8.1 | 账号 / 绑定 / 在线 / 时间窗统计 |
 | `ping` | 双向 | — | 心跳 |
 | `pong` | 双向 | — | 心跳应答 |
-| `error` | 双向 | `code`(string), `message`(string) | 错误 |
+| `error` | 双向 | `code`(string), `message`(string), `request_id`(string, 可选) | 错误；握手阶段为明文帧 |
 
 **典型时序**
 
 ```
-plugin → bot   verify.watch   { code:"MC-8F3K2A", group_id:"123456", ttl:300 }
+plugin → bot   verify.watch   { code:"MC-8F3K2A", ttl:300, provider:"qq" }
 bot    → plugin verify.watch.ack { code:"MC-8F3K2A", accepted:true }
    ... 玩家在群里发送 MC-8F3K2A ...
-bot    → plugin verify.matched { code:"MC-8F3K2A", qq:"10001", group_id:"123456",
-                                 group_nick:"张三", is_group_member:true, matched_at:... }
+bot    → plugin verify.matched { code:"MC-8F3K2A", subject:"10001", scope:"123456",
+                                 display_name:"张三", matched_at:... }
 plugin → bot   verify.matched.ack { code:"MC-8F3K2A", consumed:true }
 ```
 
-> **职责边界**：`verify.matched` 里 plugin **不**信任 `is_group_member` 作为唯一依据——
-> bot 必须真正查过群成员（OneBot `get_group_member_info`）。plugin 侧另有 TTL、限次与
-> "该 QQ 已绑定账号数" 校验。
+> **职责边界**：平台语义（房间、成员/角色、账号格式、平台反滥用）**全部由 bot 侧负责**——
+> bot 只在判定有效时才回报 `verify.matched`。插件只做**平台无关**的接受规则：码命中活跃会话、
+> TTL、尝试次数、该 `subject` 已绑账号数上限、绑定冷却。插件不校验"房间/成员"。
+
+### 8.1 玩家信息查询（`query.v1`）
+
+**默认关闭**，由 `bot.query.enabled` 控制；启用后 plugin 在 capabilities 里声明 `query.v1`。
+**权限校验由 bot 侧负责**：plugin 只认「已配对且已建立会话」这一前提，返回给 bot 的数据
+由 bot 决定展示给谁。响应载荷回带 `request_id`（= 请求内层 `id`），据此关联请求与响应。
+
+> 字段编码见第 8 节开头：值在接收方都是字符串。`accounts` / `identities` 用 `,` 连接、
+> `entries` 用 `;` 连接（各分量本身不含分隔符）。
+
+`query.account`（`by` = `name` \| `uuid`）→ `query.account.result`：
+
+| 字段 | 类型 | 说明 |
+|---|---|---|
+| `found` | bool | 是否存在 |
+| `id` / `name` / `uuid` / `status` | int / string | 账号标识与状态 |
+| `premium_uuid` / `last_server` / `last_ip` | string | 无则为空串 |
+| `created_at` / `last_login_at` | int | unix 秒；从未登录为 0 |
+| `bindings` | string | 每条 `provider:identifier:verified_at`，`;` 连接（如 `email:a@qq.com:1700000000;qq:10001:1700000001`） |
+| `identities` | string | 每条 `kind:identifier`（`java` / `bedrock`），`,` 连接 |
+
+`query.lookup`（`by` = `ip` 或**已配置的渠道 id**）→ `query.lookup.result`：
+`found`(bool)、`by`、`value`、`count`(int)、`accounts`（`,` 连接的账号名）。同一渠道标识可绑定多个账号
+（受 `max-accounts` 限制），故为多值；`ip` 会同时匹配登录历史与 `accounts.last_ip`。
+
+`query.history`（`by` = `name` \| `uuid`；`result` ∈ `success` \| `failed` \| `logout`；`since` unix 秒）
+→ `query.history.result`：`found`(bool)、`count`(int)、`entries`（`;` 连接），每条 `at|result|ip|identity`。
+
+`limit` 会被裁剪到 `[1, bot.query.max-results]`。失败时回密封 `error` 帧，`code` 为
+`query_disabled`（未启用）或 `bad_request`（参数非法）。
+
+`query.binding-history`（`by` = 已配置的渠道 id）→ `query.binding-history.result`：
+`found`(bool)、`by`、`value`、`count`(int)、`entries`（`;` 连接），每条 `at|action|ip|account_id|account`
+（`action` ∈ `bind` \| `unbind` \| `delete`；`account` 为空表示账号已注销）。
+另附 `cooldown_until`(int)：该标识可再次绑定的时间点（unix 秒，0 表示无冷却/已可绑定）。
+即使账号已解绑或注销，这里仍能查到它曾绑定的 QQ / 邮箱。
+
+`query.stats`（无参数）→ `query.stats.result`：聚合统计（**无 PII**，只给数字）：
+
+| 字段 | 含义 |
+|---|---|
+| `accounts_total` | 总账号数 |
+| `accounts_<status>` | 按状态分组（`accounts_active` / `accounts_pending_binding` / `accounts_locked`） |
+| `bound_<provider>` | 各渠道去重绑定账号数（如 `bound_email` / `bound_qq`；每个已配置渠道都有字段，无则 0） |
+| `online` | 当前在线已认证会话数 |
+| `bot_connected` | 已就绪的 bot 会话数 |
+| `registered_24h` / `registered_7d` / `registered_30d` | 近窗口注册数 |
+| `logins_24h` / `logins_7d` / `logins_30d` | 近窗口**成功**登录数 |
+
+> 查询接口只读；**永不返回密码哈希**。
 
 ---
 
@@ -356,23 +426,26 @@ plugin → bot   verify.matched.ack { code:"MC-8F3K2A", consumed:true }
 
 | code | 触发 |
 |---|---|
-| `pairing_missing` | `pairing_id` 不存在 |
-| `pairing_expired` | 配对记录过期 |
-| `pairing_used` | 配对记录已被消费 |
-| `pairing_attempts_exceeded` | 失败次数超限 |
-| `signature_invalid` | 验签失败 |
-| `key_not_paired` | `client_key_id` 未配对 |
+| `pairing_missing` | `pairing_id` 不存在（含已消费 / 已过期） |
+| `pairing_expired` | 配对 challenge 已过期 |
+| `pairing_attempts_exceeded` | 配对失败次数超限 |
+| `signature_invalid` | 验签失败 / 字段不匹配 / 时间偏差过大 |
+| `key_not_paired` | `client_key_id` 未配对或指纹不匹配 |
 | `version_unsupported` | 协议版本不兼容 |
-| `decrypt_failed` | 密封帧解密失败 |
+| `decrypt_failed` | 密封帧解密失败 / 未完成握手即收到密封帧 |
 | `replay_detected` | `seq` 重放 |
-| `rate_limited` | 触发限流 |
-| `internal_error` | 其它 |
+| `query_disabled` | 收到 `query.*` 但查询接口未启用 |
+| `bad_request` | `query.*` 参数非法（`by`/`value`/`result` 等） |
+| `internal_error` | 其它（状态异常、未知帧、期望类型不符等） |
+
+> `rate_limited` 为**保留码**，当前插件实现未产生（限流在命令层处理）。握手阶段的
+> `error` 为**明文帧**（第 4.3 节），业务 / 查询阶段的 `error` 为**密封帧**并回带 `request_id`。
 
 ---
 
 ## 10. 安全要求（规范性）
 
-1. `ts` 与服务器时间偏差超过 **±120 秒** 的握手帧必须拒绝
+1. `ts` 与服务器时间偏差超过 **±120 秒**（默认，可配 `security.clock-skew-seconds`）的握手帧必须拒绝
 2. `id` 在同一连接内必须唯一，重复拒绝
 3. 配对码：**仅存内存**、一次性、TTL、限次、**绝不写入日志**
 4. `pair.*` 的签名必须包含配对码（`code=` 行）
@@ -383,7 +456,7 @@ plugin → bot   verify.matched.ack { code:"MC-8F3K2A", consumed:true }
 9. 临时 X25519 密钥**每次连接重新生成**（前向保密）
 10. 任一手握/解密失败 → 立即关闭连接
 11. Ed25519 私钥必须以受限权限存储；公钥以指纹 pin
-12. 握手必须在 **10 秒**内完成，否则关闭
+12. 握手必须在 **10 秒**（默认，可配 `security.handshake-timeout-seconds`）内完成，否则关闭
 
 ---
 
@@ -422,6 +495,7 @@ plugin → bot   verify.matched.ack { code:"MC-8F3K2A", consumed:true }
 - [ ] 心跳 `ping`/`pong` 与超时
 - [ ] 业务消息处理：`verify.watch` → 群消息监听 → 群成员校验 → `verify.matched`
 - [ ] 群消息命中后按需**撤回**（收到 `verify.matched.ack` 后）
+- [ ] 业务消息处理：`query.account` / `query.lookup` / `query.history` / `query.binding-history`（按响应 `request_id` 关联）
 - [ ] 通过全部测试向量
 
 ---
@@ -434,7 +508,7 @@ plugin → bot   verify.matched.ack { code:"MC-8F3K2A", consumed:true }
 | 文件 | 内容 |
 |---|---|
 | `protocol.mjs` | `canonical()` / `signature_input()` / `message_plaintext()` / HKDF / AES-GCM 密封帧 |
-| `bot-client.mjs` | `ReferenceBot`：配对 + 会话认证 + `verify.watch` / `verify.matched` 处理 |
+| `bot-client.mjs` | `ReferenceBot`：配对 + 会话认证 + `verify.watch` / `verify.matched` 处理 + `query.*`（`sendQuery`，命令行 `--query`） |
 
 自检（对照本目录的测试向量，逐字节比对）：
 

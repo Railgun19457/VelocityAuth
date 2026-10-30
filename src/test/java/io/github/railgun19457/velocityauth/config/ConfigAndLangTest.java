@@ -29,6 +29,22 @@ class ConfigAndLangTest {
     }
 
     @Test
+    @SuppressWarnings("unchecked")
+    void shippedConfigParses() throws Exception {
+        try (java.io.InputStream in =
+                     io.github.railgun19457.velocityauth.VelocityAuthPlugin.class.getResourceAsStream("/config.yml")) {
+            assertTrue(in != null, "缺少内置 config.yml");
+            Object loaded = new org.yaml.snakeyaml.Yaml(
+                    new org.yaml.snakeyaml.constructor.SafeConstructor(
+                            new org.yaml.snakeyaml.LoaderOptions())).load(in);
+            VelocityAuthConfig config = VelocityAuthConfig.from(ConfigNode.root((Map<String, Object>) loaded));
+            assertTrue(config.bot().enabled() == false);
+            assertTrue(config.binding().social().containsKey("qq"), "内置配置应含 social.qq");
+            assertEquals(1, config.binding().email().maxAccounts());
+        }
+    }
+
+    @Test
     void invalidEnumValueReportsFieldPath() {
         Map<String, Object> root = Map.of("database", Map.of("type", "postgres"));
         ConfigException error = assertThrows(ConfigException.class, () -> VelocityAuthConfig.from(ConfigNode.root(root)));

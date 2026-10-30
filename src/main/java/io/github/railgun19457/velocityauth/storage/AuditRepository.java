@@ -90,6 +90,16 @@ public final class AuditRepository {
         });
     }
 
+    /** 删除 {@code at < cutoff} 的审计记录；返回删除行数。 */
+    public int prune(long cutoff) {
+        return database.inTransaction(connection -> {
+            try (PreparedStatement ps = connection.prepareStatement("DELETE FROM audit_log WHERE at < ?")) {
+                ps.setLong(1, cutoff);
+                return ps.executeUpdate();
+            }
+        });
+    }
+
     private static String truncate(String value) {
         return value.length() <= 500 ? value : value.substring(0, 500);
     }

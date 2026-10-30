@@ -1,7 +1,7 @@
 package io.github.railgun19457.velocityauth.config;
 
+import io.github.railgun19457.velocityauth.auth.Provider;
 import io.github.railgun19457.velocityauth.config.VelocityAuthConfig.Domain;
-import io.github.railgun19457.velocityauth.storage.model.BindingType;
 import io.github.railgun19457.velocityauth.util.ReleasedResource;
 import org.slf4j.Logger;
 import org.yaml.snakeyaml.LoaderOptions;
@@ -18,6 +18,7 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 
@@ -30,7 +31,6 @@ public final class ConfigService {
 
     private static final String DEFAULT_RESOURCE = "/config.yml";
 
-    private final Path dataDirectory;
     private final Path configFile;
     private final Class<?> resourceAnchor;
     private final Logger logger;
@@ -39,7 +39,7 @@ public final class ConfigService {
     private volatile List<String> warnings = List.of();
 
     public ConfigService(Path dataDirectory, Class<?> resourceAnchor, Logger logger) {
-        this.dataDirectory = Objects.requireNonNull(dataDirectory, "dataDirectory");
+        Objects.requireNonNull(dataDirectory, "dataDirectory");
         this.configFile = dataDirectory.resolve("config.yml");
         this.resourceAnchor = Objects.requireNonNull(resourceAnchor, "resourceAnchor");
         this.logger = Objects.requireNonNull(logger, "logger");
@@ -121,17 +121,18 @@ public final class ConfigService {
             out.add("servers.login 与 servers.default 相同（" + cfg.servers().login()
                     + "），未认证玩家与已认证玩家将进入同一服务器，隔离将失效");
         }
-        for (BindingType type : cfg.registration().requireBinding()) {
-            if (type == BindingType.EMAIL) {
-                if (!cfg.binding().email().enabled()) {
-                    out.add("registration.require-binding 含 email，但 binding.email.enabled=false，邮箱绑定将不可用");
-                }
+        for (String providerId : cfg.registration().requireBinding()) {
+            java.util.Optional<Provider> provider = Provider.find(cfg, providerId);
+            if (provider.isEmpty() || !provider.get().enabled()) {
+                out.add("registration.require-binding 含 " + providerId + "，但该渠道不存在或未启用");
+                continue;
+            }
+            if (provider.get().email()) {
                 if (!cfg.smtp().enabled()) {
                     out.add("registration.require-binding 含 email，但 smtp.enabled=false，验证码邮件将无法发送");
                 }
-            }
-            if (type == BindingType.QQ && !cfg.qqbot().enabled()) {
-                out.add("registration.require-binding 含 qq，但 qqbot.enabled=false，QQ 绑定将不可用");
+            } else if (!cfg.bot().enabled()) {
+                out.add("registration.require-binding 含 " + providerId + "，但 bot.enabled=false，该渠道绑定将不可用");
             }
         }
         if (cfg.smtp().enabled() && cfg.smtp().username().isBlank()) {
@@ -142,15 +143,22 @@ public final class ConfigService {
         }
         if (cfg.binding().email().domain().mode() != Domain.Mode.OFF
                 && cfg.binding().email().domain().list().isEmpty()) {
-            out.add("binding.email.domain.mode=" + cfg.binding().email().domain().mode().name().toLowerCase()
+            out.add("binding.email.domain.mode=" + cfg.binding().email().domain().mode().name().toLowerCase(Locale.ROOT)
                     + " 但 list 为空，所有邮箱域名都将" + (cfg.binding().email().domain().mode() == Domain.Mode.WHITELIST
                     ? "被拒绝" : "被放行"));
         }
-        if (cfg.qqbot().enabled() && cfg.qqbot().groupId().isBlank()) {
-            out.add("qqbot.enabled=true 但 qqbot.group-id 为空，QQ 验证无法工作");
-        }
         if (cfg.auth().session().enabled() && cfg.auth().session().ttlMinutes() <= 0) {
             throw new ConfigException("auth.session.ttl-minutes", "必须为正数");
+        }
+        int bindingHistoryDays = cfg.database().bindingHistoryDays();
+        if (bindingHistoryDays > 0) {
+            long maxCooldownMinutes = bindingHistoryDays * 1440L;
+            for (Provider provider : Provider.all(cfg)) {
+                if (provider.cooldownMinutes() > maxCooldownMinutes) {
+                    out.add("binding." + provider.id() + ".cooldown-minutes 超过 database.binding-history-days"
+                            + " 的覆盖范围，冷却可能因历史被清理而提前结束");
+                }
+            }
         }
         return out;
     }

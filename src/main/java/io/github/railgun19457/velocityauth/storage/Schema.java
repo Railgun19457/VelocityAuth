@@ -19,7 +19,7 @@ import java.util.List;
 public final class Schema {
 
     /** 当前期望的 schema 版本。 */
-    public static final int CURRENT_VERSION = 1;
+    public static final int CURRENT_VERSION = 3;
 
     private Schema() {
     }
@@ -35,16 +35,15 @@ public final class Schema {
             if (current == CURRENT_VERSION) {
                 return null;
             }
-            if (current == 0) {
-                createInitialSchema(connection, database.dialect());
-                writeVersion(connection, database.dialect(), CURRENT_VERSION);
-                logger.info("[VelocityAuth] 已初始化数据库结构（schema v{}）", CURRENT_VERSION);
-                return null;
-            }
+            boolean fresh = current == 0;
+            // 全新库从 v1 起逐版本应用，保证初始结构与后续迁移完全一致（避免"建 v1 表却标记为最新版"）
             for (int version = current + 1; version <= CURRENT_VERSION; version++) {
                 applyMigration(connection, database.dialect(), version);
                 writeVersion(connection, database.dialect(), version);
                 logger.info("[VelocityAuth] 已应用数据库迁移 v{}", version);
+            }
+            if (fresh) {
+                logger.info("[VelocityAuth] 已初始化数据库结构（schema v{}）", CURRENT_VERSION);
             }
             return null;
         });
@@ -98,20 +97,14 @@ public final class Schema {
         }
     }
 
-    /** 按版本返回迁移语句。v1 为初始建表。 */
+    /** 按版本返回迁移语句。v1 初始建表；v2 登录历史；v3 绑定历史（解绑/注销后可追溯 + 冷却）。 */
     private static List<String> migrationStatements(Dialect dialect, int version) {
-        if (version == 1) {
-            return initialStatements(dialect);
-        }
-        throw new StorageException("缺少 v" + version + " 的迁移脚本");
-    }
-
-    private static void createInitialSchema(Connection connection, Dialect dialect) throws SQLException {
-        for (String statement : initialStatements(dialect)) {
-            try (Statement st = connection.createStatement()) {
-                st.execute(statement);
-            }
-        }
+        return switch (version) {
+            case 1 -> initialStatements(dialect);
+            case 2 -> loginHistoryStatements(dialect);
+            case 3 -> bindingHistoryStatements(dialect);
+            default -> throw new StorageException("缺少 v" + version + " 的迁移脚本");
+        };
     }
 
     private static List<String> initialStatements(Dialect dialect) {
@@ -226,6 +219,77 @@ public final class Schema {
                     + ")");
             out.add("CREATE INDEX IF NOT EXISTS idx_audit_log_at ON audit_log (at)");
             out.add("CREATE INDEX IF NOT EXISTS idx_audit_log_account ON audit_log (account_id)");
+        }
+        return out;
+    }
+
+    /** v2：登录历史（成功 / 失败 / 登出），供 bot 侧管理查询与异常登录排查。 */
+    private static List<String> loginHistoryStatements(Dialect dialect) {
+        List<String> out = new ArrayList<>();
+        if (dialect == Dialect.MYSQL) {
+            out.add("CREATE TABLE IF NOT EXISTS login_history ("
+                    + " id BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,"
+                    + " account_id BIGINT NULL,"
+                    + " at BIGINT NOT NULL,"
+                    + " ip VARCHAR(45) NULL,"
+                    + " result VARCHAR(16) NOT NULL,"
+                    + " identity VARCHAR(128) NULL,"
+                    + " detail VARCHAR(255) NULL,"
+                    + " KEY idx_login_history_account (account_id, at),"
+                    + " KEY idx_login_history_ip (ip),"
+                    + " CONSTRAINT fk_login_history_account FOREIGN KEY (account_id)"
+                    + "   REFERENCES accounts (id) ON DELETE CASCADE"
+                    + ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+        } else {
+            out.add("CREATE TABLE IF NOT EXISTS login_history ("
+                    + " id INTEGER PRIMARY KEY AUTOINCREMENT,"
+                    + " account_id INTEGER REFERENCES accounts(id) ON DELETE CASCADE,"
+                    + " at INTEGER NOT NULL,"
+                    + " ip TEXT,"
+                    + " result TEXT NOT NULL,"
+                    + " identity TEXT,"
+                    + " detail TEXT"
+                    + ")");
+            out.add("CREATE INDEX IF NOT EXISTS idx_login_history_account ON login_history (account_id, at)");
+            out.add("CREATE INDEX IF NOT EXISTS idx_login_history_ip ON login_history (ip)");
+        }
+        return out;
+    }
+
+    /**
+     * v3：绑定历史（bind / unbind / delete）。值不随绑定或账号删除而丢失，
+     * 既用于「解绑/注销后追溯 QQ/邮箱」，也用于解绑/注销后的再绑定冷却。
+     * <p>
+     * {@code account_id} 故意**不设外键级联**：账号被删后记录仍保留。
+     */
+    private static List<String> bindingHistoryStatements(Dialect dialect) {
+        List<String> out = new ArrayList<>();
+        if (dialect == Dialect.MYSQL) {
+            out.add("CREATE TABLE IF NOT EXISTS binding_history ("
+                    + " id BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,"
+                    + " account_id BIGINT NULL,"
+                    + " type VARCHAR(16) NOT NULL,"
+                    + " identifier VARCHAR(255) NOT NULL,"
+                    + " action VARCHAR(16) NOT NULL,"
+                    + " at BIGINT NOT NULL,"
+                    + " ip VARCHAR(45) NULL,"
+                    + " KEY idx_binding_history_identifier (type, identifier, at),"
+                    + " KEY idx_binding_history_account (account_id, at)"
+                    + ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+        } else {
+            out.add("CREATE TABLE IF NOT EXISTS binding_history ("
+                    + " id INTEGER PRIMARY KEY AUTOINCREMENT,"
+                    + " account_id INTEGER,"
+                    + " type TEXT NOT NULL,"
+                    + " identifier TEXT NOT NULL,"
+                    + " action TEXT NOT NULL,"
+                    + " at INTEGER NOT NULL,"
+                    + " ip TEXT"
+                    + ")");
+            out.add("CREATE INDEX IF NOT EXISTS idx_binding_history_identifier"
+                    + " ON binding_history (type, identifier, at)");
+            out.add("CREATE INDEX IF NOT EXISTS idx_binding_history_account"
+                    + " ON binding_history (account_id, at)");
         }
         return out;
     }

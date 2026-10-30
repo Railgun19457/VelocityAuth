@@ -1,5 +1,7 @@
 package io.github.railgun19457.velocityauth.storage.model;
 
+import java.util.Locale;
+
 /** 账号状态。 */
 public enum AccountStatus {
     ACTIVE,
@@ -11,14 +13,14 @@ public enum AccountStatus {
     PENDING_BINDING;
 
     public String dbValue() {
-        return name().toLowerCase();
+        return name().toLowerCase(Locale.ROOT);
     }
 
     public static AccountStatus fromDb(String value) {
         if (value == null) {
             return ACTIVE;
         }
-        return switch (value.toLowerCase()) {
+        return switch (value.toLowerCase(Locale.ROOT)) {
             case "locked" -> LOCKED;
             case "pending_binding" -> PENDING_BINDING;
             default -> ACTIVE;

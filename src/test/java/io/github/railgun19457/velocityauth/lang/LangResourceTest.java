@@ -58,7 +58,7 @@ class LangResourceTest {
                 "prefix",
                 "command.login.usage", "command.register.usage", "command.verify.usage",
                 "command.deleteaccount.request", "command.bind.email-domains-allow",
-                "verification.qq-instruction", "verification.wrong-code",
+                "verification.social-instruction", "verification.wrong-code",
                 "auth.login-required", "routing.joining-login",
                 "admin.status.header"}) {
             assertTrue(zh.has(key), "缺少语言 key：" + key);
@@ -80,10 +80,11 @@ class LangResourceTest {
         assertTrue(suggests.contains("/register "), "缺少 /register 填充按钮：" + suggests);
 
         Set<String> binds = new LinkedHashSet<>();
-        collectClicks(zh.msg("command.bind.required-email"), ClickEvent.Action.SUGGEST_COMMAND, binds);
-        collectClicks(zh.msg("command.bind.required-qq", "group", "123456"),
+        collectClicks(zh.msg("command.bind.required", "provider", "email"),
                 ClickEvent.Action.SUGGEST_COMMAND, binds);
-        assertTrue(binds.contains("/bind email "), "缺少 /bind email 填充按钮：" + binds);
+        collectClicks(zh.msg("command.bind.required", "provider", "qq"),
+                ClickEvent.Action.SUGGEST_COMMAND, binds);
+        assertTrue(binds.contains("/bind email"), "缺少 /bind email 填充按钮：" + binds);
         assertTrue(binds.contains("/bind qq"), "缺少 /bind qq 填充按钮：" + binds);
 
         // 点击复制：占位符替换要作用到 click 的参数上
@@ -101,8 +102,9 @@ class LangResourceTest {
 
     private static void collectClicks(Component component, ClickEvent.Action action, Set<String> out) {
         ClickEvent click = component.clickEvent();
-        if (click != null && click.action() == action && click.value() != null) {
-            out.add(click.value());
+        if (click != null && click.action() == action
+                && click.payload() instanceof ClickEvent.Payload.Text text) {
+            out.add(text.value());
         }
         for (Component child : component.children()) {
             collectClicks(child, action, out);

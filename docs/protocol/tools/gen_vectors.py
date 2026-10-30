@@ -282,7 +282,7 @@ def main() -> None:
 
     result_inner = {"ok": True, "session_id": "sess_1", "server_time": ts, "capabilities": ["verify.v1"]}
     confirm_inner = {"session_id": "sess_1"}
-    watch_inner = {"code": "MC-8F3K2A", "group_id": "123456", "ttl": 300}
+    watch_inner = {"code": "MC-8F3K2A", "provider": "qq", "ttl": 300}
 
     def sealed_entry(direction, seq, key_name, key, type_, id_, payload):
         return {"direction": direction, "seq": seq, "epoch": 0, "key": key_name,

@@ -8,18 +8,18 @@ import java.util.function.Consumer;
  * 发起一次验证的请求参数。
  *
  * @param purpose        验证目的
- * @param channel        验证渠道
+ * @param provider       渠道 id（provider id，如 {@code email} / {@code qq}）
  * @param playerUuid     发起者
  * @param accountName    待注册/找回的账号名（可空）
  * @param connectionName 本次连接名
  * @param ip             发起者 IP
- * @param target         目标标识（email 渠道为邮箱地址；qq 渠道为空）
+ * @param target         目标标识（email 渠道为邮箱地址；社交渠道为空）
  * @param data           完成验证后要写入的数据（如已哈希的密码）
  * @param onDispatch     派发结果回调
  */
 public record VerificationRequest(
         VerificationPurpose purpose,
-        VerificationChannel channel,
+        String provider,
         UUID playerUuid,
         String accountName,
         String connectionName,
@@ -28,14 +28,14 @@ public record VerificationRequest(
         Map<String, String> data,
         Consumer<VerificationDispatch> onDispatch
 ) {
-    public static Builder builder(VerificationPurpose purpose, VerificationChannel channel, UUID playerUuid) {
-        return new Builder(purpose, channel, playerUuid);
+    public static Builder builder(VerificationPurpose purpose, String provider, UUID playerUuid) {
+        return new Builder(purpose, provider, playerUuid);
     }
 
     /** 便捷构建器。 */
     public static final class Builder {
         private final VerificationPurpose purpose;
-        private final VerificationChannel channel;
+        private final String provider;
         private final UUID playerUuid;
         private String accountName;
         private String connectionName;
@@ -45,9 +45,9 @@ public record VerificationRequest(
         private Consumer<VerificationDispatch> onDispatch = dispatch -> {
         };
 
-        private Builder(VerificationPurpose purpose, VerificationChannel channel, UUID playerUuid) {
+        private Builder(VerificationPurpose purpose, String provider, UUID playerUuid) {
             this.purpose = purpose;
-            this.channel = channel;
+            this.provider = provider;
             this.playerUuid = playerUuid;
         }
 
@@ -83,7 +83,7 @@ public record VerificationRequest(
         }
 
         public VerificationRequest build() {
-            return new VerificationRequest(purpose, channel, playerUuid, accountName, connectionName, ip,
+            return new VerificationRequest(purpose, provider, playerUuid, accountName, connectionName, ip,
                     target, data, onDispatch);
         }
     }

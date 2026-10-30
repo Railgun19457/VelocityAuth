@@ -35,8 +35,10 @@ public final class KeyStore {
     /** {@code touch} 落盘的最小间隔（毫秒）。 */
     private static final long TOUCH_SAVE_INTERVAL_MILLIS = 60_000L;
 
+    /** 复用同一个强随机源（生成配对码等）。 */
+    private static final SecureRandom RANDOM = new SecureRandom();
+
     private final Path directory;
-    private final Path identityFile;
     private final Path clientsFile;
     private final PluginLogger log;
 
@@ -45,14 +47,12 @@ public final class KeyStore {
     private final Map<String, PairedClient> clients = new ConcurrentHashMap<>();
     private volatile long lastTouchSaveAt;
 
-    public record PairedClient(String clientId, String keyId, byte[] publicKey, String fingerprint,
+    public record PairedClient(String clientId, String keyId, String provider, byte[] publicKey, String fingerprint,
                                long pairedAt, long lastSeen) {
     }
 
-    private KeyStore(Path directory, Path identityFile, Path clientsFile, Map<String, Object> identity,
-                     PluginLogger log) {
+    private KeyStore(Path directory, Path clientsFile, Map<String, Object> identity, PluginLogger log) {
         this.directory = directory;
-        this.identityFile = identityFile;
         this.clientsFile = clientsFile;
         this.identity = identity;
         this.log = log;
@@ -73,7 +73,7 @@ public final class KeyStore {
             identity = createIdentity(identityFile, log);
         }
 
-        KeyStore store = new KeyStore(directory, identityFile, clientsFile, identity, log);
+        KeyStore store = new KeyStore(directory, clientsFile, identity, log);
         store.loadClients();
         return store;
     }
@@ -114,6 +114,7 @@ public final class KeyStore {
                 PairedClient client = new PairedClient(
                         Json.string(object, "client_id"),
                         Json.string(object, "key_id"),
+                        Json.string(object, "provider"),
                         Base64Url.decode(Json.string(object, "public_key")),
                         Json.string(object, "fingerprint"),
                         Json.longValue(object, "paired_at") == null ? 0L : Json.longValue(object, "paired_at"),
@@ -178,7 +179,7 @@ public final class KeyStore {
         }
         long now = System.currentTimeMillis();
         clients.put(key(clientId, keyId), new PairedClient(existing.clientId(), existing.keyId(),
-                existing.publicKey(), existing.fingerprint(), existing.pairedAt(), now / 1000L));
+                existing.provider(), existing.publicKey(), existing.fingerprint(), existing.pairedAt(), now / 1000L));
         // 心跳（pong）很频繁：last_seen 只更新内存，落盘节流到最多每 60 秒一次，
         // 其余时间靠 pair/revoke/flush（关服）持久化，避免高频磁盘写入。
         if (now - lastTouchSaveAt >= TOUCH_SAVE_INTERVAL_MILLIS) {
@@ -198,6 +199,7 @@ public final class KeyStore {
             JsonObject object = new JsonObject();
             object.addProperty("client_id", client.clientId());
             object.addProperty("key_id", client.keyId());
+            object.addProperty("provider", client.provider());
             object.addProperty("public_key", Base64Url.encode(client.publicKey()));
             object.addProperty("fingerprint", client.fingerprint());
             object.addProperty("paired_at", client.pairedAt());
@@ -220,7 +222,7 @@ public final class KeyStore {
 
     private static String randomHex(int length) {
         byte[] bytes = new byte[length / 2];
-        new SecureRandom().nextBytes(bytes);
+        RANDOM.nextBytes(bytes);
         StringBuilder sb = new StringBuilder(length);
         for (byte b : bytes) {
             sb.append(String.format("%02x", b));

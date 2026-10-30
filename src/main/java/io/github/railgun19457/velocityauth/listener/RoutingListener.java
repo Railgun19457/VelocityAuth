@@ -14,6 +14,7 @@ import io.github.railgun19457.velocityauth.auth.AuthSessionRegistry;
 import io.github.railgun19457.velocityauth.config.VelocityAuthConfig;
 import io.github.railgun19457.velocityauth.storage.model.Account;
 import io.github.railgun19457.velocityauth.storage.model.AuditEntry;
+import io.github.railgun19457.velocityauth.storage.model.LoginHistory;
 
 import java.util.Optional;
 
@@ -160,6 +161,9 @@ public final class RoutingListener {
                 plugin.storage().audit().log(
                         io.github.railgun19457.velocityauth.auth.AuthService.nowSeconds(),
                         account.id(), AuditEntry.LOGOUT, session.ip(), "connection=" + session.connectionName());
+                plugin.storage().loginHistory().insert(
+                        account.id(), io.github.railgun19457.velocityauth.auth.AuthService.nowSeconds(),
+                        session.ip(), LoginHistory.LOGOUT, session.connectionName(), "connection");
             } catch (RuntimeException e) {
                 plugin.log().warn("断开清理失败：{}", e.getMessage());
             }

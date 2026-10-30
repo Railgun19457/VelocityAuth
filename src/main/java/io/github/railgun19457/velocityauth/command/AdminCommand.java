@@ -6,13 +6,13 @@ import com.velocitypowered.api.proxy.Player;
 import io.github.railgun19457.velocityauth.VelocityAuthPlugin;
 import io.github.railgun19457.velocityauth.auth.AuthSession;
 import io.github.railgun19457.velocityauth.auth.PasswordHasher;
+import io.github.railgun19457.velocityauth.auth.Provider;
 import io.github.railgun19457.velocityauth.bot.KeyStore;
 import io.github.railgun19457.velocityauth.bot.PairingService;
+import io.github.railgun19457.velocityauth.query.AccountQueryService;
 import io.github.railgun19457.velocityauth.storage.model.Account;
 import io.github.railgun19457.velocityauth.storage.model.AccountStatus;
 import io.github.railgun19457.velocityauth.storage.model.AuditEntry;
-import io.github.railgun19457.velocityauth.storage.model.Binding;
-import io.github.railgun19457.velocityauth.storage.model.BindingType;
 import io.github.railgun19457.velocityauth.util.Addresses;
 import net.kyori.adventure.text.Component;
 
@@ -80,13 +80,13 @@ public final class AdminCommand implements SimpleCommand {
                 plugin.config().smtp().enabled() ? plugin.lang().raw("admin.status.enabled")
                         : plugin.lang().raw("admin.status.disabled")));
         var bot = plugin.botServer();
-        Component qqbot = bot == null
+        Component botStatus = bot == null
                 ? plugin.lang().raw("admin.status.disabled")
                 : plugin.lang().raw("admin.status.connected")
                         .append(Component.text(" (" + bot.readyCount() + ") "))
                         .append(plugin.lang().raw("admin.status.disconnected"))
                         .append(Component.text(" (" + bot.pendingCount() + ")"));
-        source.sendMessage(plugin.lang().msg("admin.status.qqbot", "value", qqbot));
+        source.sendMessage(plugin.lang().msg("admin.status.bot", "value", botStatus));
         source.sendMessage(plugin.lang().msg("admin.status.sessions", "value",
                 plugin.sessionRegistry().authenticatedSessions().size()));
         source.sendMessage(plugin.lang().msg("admin.status.pending-verifications", "value",
@@ -156,15 +156,15 @@ public final class AdminCommand implements SimpleCommand {
                     usage(source);
                     return;
                 }
-                BindingType type = BindingType.fromName(args[3]);
-                if (type == null) {
+                String providerId = args[3].toLowerCase(Locale.ROOT);
+                if (!Provider.exists(plugin.config(), providerId)) {
                     usage(source);
                     return;
                 }
-                plugin.bindings().unbind(account, type, ip).thenAccept(outcome ->
+                plugin.bindings().unbind(account, providerId, ip).thenAccept(outcome ->
                         source.sendMessage(outcome.ok()
                                 ? plugin.lang().msg("admin.account.unbound", "account", account.name(),
-                                "type", type.dbValue())
+                                "type", providerId)
                                 : plugin.lang().msg("command.unbind.not-bound")));
             }
             case "lock", "unlock" -> {
@@ -187,14 +187,10 @@ public final class AdminCommand implements SimpleCommand {
             }
             case "delete" -> {
                 long accountId = account.id();
-                plugin.async().run(() -> {
-                    plugin.storage().accounts().delete(accountId);
-                    plugin.authService().forgetAccount(accountId);
-                    plugin.storage().audit().log(
-                            io.github.railgun19457.velocityauth.auth.AuthService.nowSeconds(), null,
-                            "admin_delete", ip, "account=" + account.name() + " by=" + sourceName(source));
-                    source.sendMessage(plugin.lang().msg("admin.account.deleted", "account", account.name()));
-                });
+                String detail = "account=" + account.name() + " by=" + sourceName(source);
+                plugin.authService().deleteAccount(accountId, ip, "admin_delete", detail)
+                        .thenAccept(removed -> source.sendMessage(
+                                plugin.lang().msg("admin.account.deleted", "account", account.name())));
                 kickAccount(account, "账号已被删除");
             }
             default -> usage(source);
@@ -202,32 +198,26 @@ public final class AdminCommand implements SimpleCommand {
     }
 
     private void accountInfo(CommandSource source, Account account) {
-        source.sendMessage(plugin.lang().msg("admin.account.info-header", "account", account.name()));
-        source.sendMessage(plugin.lang().msg("admin.account.info-id", "value", account.id()));
-        source.sendMessage(plugin.lang().msg("admin.account.info-uuid", "value", account.uuid()));
-        source.sendMessage(plugin.lang().msg("admin.account.info-status", "value", account.status().dbValue()));
-        List<Binding> bindings = plugin.bindings().bindings(account.id());
-        source.sendMessage(plugin.lang().msg("admin.account.info-email", "value",
-                orNone(bindings.stream().filter(b -> b.type() == BindingType.EMAIL).map(Binding::identifier)
-                        .findFirst())));
-        source.sendMessage(plugin.lang().msg("admin.account.info-qq", "value",
-                orNone(bindings.stream().filter(b -> b.type() == BindingType.QQ).map(Binding::identifier)
-                        .findFirst())));
+        AccountQueryService.AccountView view = plugin.queries().view(account);
+        source.sendMessage(plugin.lang().msg("admin.account.info-header", "account", view.name()));
+        source.sendMessage(plugin.lang().msg("admin.account.info-id", "value", view.id()));
+        source.sendMessage(plugin.lang().msg("admin.account.info-uuid", "value", view.uuid()));
+        source.sendMessage(plugin.lang().msg("admin.account.info-status", "value", view.status()));
+        String bindings = view.bindings().stream()
+                .map(binding -> binding.type() + "=" + binding.identifier())
+                .collect(java.util.stream.Collectors.joining(", "));
+        source.sendMessage(plugin.lang().msg("admin.account.info-bindings", "value",
+                bindings.isEmpty() ? plugin.lang().raw("admin.account.none") : bindings));
         source.sendMessage(plugin.lang().msg("admin.account.info-last-server", "value",
-                account.lastServer() == null ? plugin.lang().raw("admin.account.none") : account.lastServer()));
+                view.lastServer() == null ? plugin.lang().raw("admin.account.none") : view.lastServer()));
         source.sendMessage(plugin.lang().msg("admin.account.info-identities", "value",
-                plugin.storage().identities().countByAccountId(account.id())));
+                view.identities().size()));
         source.sendMessage(plugin.lang().msg("admin.account.info-created", "value",
-                TIME_FORMAT.format(Instant.ofEpochSecond(account.createdAt()))));
+                TIME_FORMAT.format(Instant.ofEpochSecond(view.createdAt()))));
         source.sendMessage(plugin.lang().msg("admin.account.info-last-login", "value",
-                account.lastLoginAt() == null ? plugin.lang().raw("admin.account.none")
-                        : TIME_FORMAT.format(Instant.ofEpochSecond(account.lastLoginAt()))
-                                + " (" + (account.lastIp() == null ? "?" : account.lastIp()) + ")"));
-    }
-
-    /** 绑定值缺失时用本地化的「无」组件占位，避免字面量标签。 */
-    private Object orNone(Optional<String> value) {
-        return value.<Object>map(v -> v).orElseGet(() -> plugin.lang().raw("admin.account.none"));
+                view.lastLoginAt() == null ? plugin.lang().raw("admin.account.none")
+                        : TIME_FORMAT.format(Instant.ofEpochSecond(view.lastLoginAt()))
+                                + " (" + (view.lastIp() == null ? "?" : view.lastIp()) + ")"));
     }
 
     private Optional<Account> findAccount(String name) {
@@ -338,7 +328,7 @@ public final class AdminCommand implements SimpleCommand {
         String sub = args.length >= 2 ? args[1].toLowerCase(Locale.ROOT) : "new";
         switch (sub) {
             case "new" -> {
-                var settings = plugin.config().qqbot().pairing();
+                var settings = plugin.config().bot().pairing();
                 PairingService.Created created = pairings.create(settings.ttlSeconds(), settings.maxAttempts());
                 source.sendMessage(plugin.lang().msg("admin.pair.created"));
                 source.sendMessage(plugin.lang().msg("admin.pair.created-id", "id", created.pairingId()));

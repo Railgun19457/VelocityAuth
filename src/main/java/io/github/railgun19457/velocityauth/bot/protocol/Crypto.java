@@ -6,6 +6,7 @@ import java.security.KeyPair;
 import java.security.KeyPairGenerator;
 import java.security.PrivateKey;
 import java.security.PublicKey;
+import java.security.SecureRandom;
 import java.security.Signature;
 import java.security.spec.EdECPoint;
 import java.security.spec.EdECPrivateKeySpec;
@@ -24,6 +25,9 @@ import javax.crypto.KeyAgreement;
 public final class Crypto {
 
     public static final int RAW_KEY_LENGTH = 32;
+
+    /** 复用同一个强随机源，避免每次调用都重新播种（SecureRandom 构造开销大）。 */
+    private static final SecureRandom RANDOM = new SecureRandom();
 
     private Crypto() {
     }
@@ -197,7 +201,7 @@ public final class Crypto {
 
     public static byte[] randomBytes(int length) {
         byte[] out = new byte[length];
-        new java.security.SecureRandom().nextBytes(out);
+        RANDOM.nextBytes(out);
         return out;
     }
 

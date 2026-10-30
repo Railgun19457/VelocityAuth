@@ -1,6 +1,6 @@
-# version: 1
+# version: 3
 # ============ VelocityAuth 配置 ============
-# 修改后可用 /vauth reload 热重载（qqbot.* 除外，改动需重启代理）。
+# 修改后可用 /vauth reload 热重载（bot.* 除外，改动需重启代理）。
 
 language: zh_cn            # 语言：zh_cn | en_us；文案在 plugins/velocityauth/lang/<语言>.yml
 
@@ -14,6 +14,9 @@ database:
     database: velocityauth
     username: root
     password: ""
+  login-history-days: 90   # 登录历史（成功/失败/登出）保留天数；0 = 永久保留
+  audit-log-days: 90       # 审计日志保留天数；0 = 永久保留
+  binding-history-days: 90 # 绑定历史（bind/unbind/delete）保留天数；0 = 永久保留
 
 servers:
   login: lobby             # 登录服：未认证玩家停留的服务器（必须是专用服）
@@ -46,24 +49,31 @@ auth:
                                      #（需 Floodgate 端启用 player-link；否则回退为改写 UUID）
 
 registration:
-  require-binding: []        # 注册后必须完成的绑定渠道，玩家任选其一；空列表 = 无需绑定
-                             # 可选：[] | [email] | [qq] | [email, qq]
+  require-binding: []        # 注册后必须完成的绑定渠道（provider id），玩家任选其一；空列表 = 无需绑定
+                             # 取值须为已配置的渠道：email 或 binding.social 下的渠道 id
   unbound-ttl-minutes: 30    # 注册后一直未绑定的账号，超过这么多分钟自动清除（0 = 不自动清除）
 
 binding:
-  email:
+  email:                     # 内置邮箱渠道（SMTP）
     enabled: true
-    max-accounts-per-email: 1        # 同一邮箱最多绑定几个账号
+    max-accounts: 1                  # 同一邮箱最多绑定几个账号
+    cooldown-minutes: 0              # 该邮箱解绑/注销后的再绑定冷却（分钟，0 = 不启用）
     domain:
       mode: whitelist                # off | whitelist | blacklist（按 @ 之后的域名精确匹配）
       list: ["qq.com"]
-  qq:
-    enabled: true
-    max-accounts-per-qq: 1           # 同一 QQ 最多绑定几个账号
+  social:                    # 通用社交渠道：键名即 provider id（可自行增加任意平台）
+    qq:
+      enabled: true
+      display-name: "QQ"             # 提示里展示的渠道名
+      max-accounts: 1                # 同一平台账号最多绑定几个账号
+      cooldown-minutes: 0            # 解绑/注销后的再绑定冷却（分钟，0 = 不启用）
+      code-length: 6                 # 该渠道验证码长度（0 = 用 verification.code-length）
+    # discord:                     # 加一个平台就是加一段配置（bot 侧实现对应适配器即可）
+    #   enabled: true
+    #   display-name: "Discord"
 
 verification:
-  email-code-length: 6               # 邮箱验证码位数
-  qq-code-length: 6                  # QQ 验证码位数
+  code-length: 6                     # 验证码长度（email 为数字码，社交渠道为字母数字）
   ttl-seconds: 300                   # 验证码有效期（秒）
   max-attempts: 5                    # 单个验证码最多尝试次数
   rate-limit:
@@ -80,17 +90,17 @@ smtp:
   from: "VelocityAuth <example@qq.com>"   # 发件人（多数邮箱要求与 username 一致）
   timeout-seconds: 10                # 连接/发送超时
 
-qqbot:
-  enabled: false                     # 需要 QQ 验证/绑定时再开
+bot:                                 # 平台无关的 bot 通道（原 qqbot）
+  enabled: false                     # 需要社交渠道验证/绑定时再开
   listen: "0.0.0.0"                  # WebSocket 监听地址
   port: 8765                         # WebSocket 监听端口
-  group-id: ""                       # 收码用的 QQ 群号
-  private-number: ""                 # 可选的 bot QQ 号，仅在提示里展示「也可私聊」时用
-  require-group-member: true         # 是否要求发码者是群成员
   pairing:
     ttl-seconds: 600                 # 配对码有效期
     max-attempts: 5                  # 配对码最多尝试次数
     bootstrap-code: ""               # 无控制台部署时可预置一次性配对码（只存内存，用后即弃）
+  query:
+    enabled: false                   # 玩家信息查询接口（query.*）；默认关闭。权限校验由 bot 侧负责
+    max-results: 50                  # 单次查询返回的最大条数（列表 / 历史记录）
 
 proxy:
   address: ""                        # 代理对外地址，供 transferToHost 用；留空则用客户端连接时的地址

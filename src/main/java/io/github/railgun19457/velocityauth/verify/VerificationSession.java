@@ -13,13 +13,13 @@ public final class VerificationSession {
 
     private final String id;
     private final VerificationPurpose purpose;
-    private final VerificationChannel channel;
+    private final String provider;
     private final String code;
     private final UUID playerUuid;
     private final String accountName;
     private final String connectionName;
     private final String ip;
-    private final String target;                 // 邮箱地址 / QQ 号（可空）
+    private final String target;                 // 邮箱地址（可空；社交渠道由 bot 回报）
     private final Map<String, String> data;
     private final long createdAt;
     private final long expiresAt;
@@ -27,16 +27,16 @@ public final class VerificationSession {
     private final AtomicInteger attempts = new AtomicInteger();
 
     private volatile boolean finished;
-    /** QQ 渠道完成时由 bot 回报的 QQ 号。 */
+    /** 社交渠道完成时由 bot 回报的平台账号。 */
     private volatile String resolvedValue;
 
-    public VerificationSession(String id, VerificationPurpose purpose, VerificationChannel channel, String code,
+    public VerificationSession(String id, VerificationPurpose purpose, String provider, String code,
                                UUID playerUuid, String accountName, String connectionName, String ip,
                                String target, Map<String, String> data, long createdAt, long expiresAt,
                                int maxAttempts) {
         this.id = id;
         this.purpose = purpose;
-        this.channel = channel;
+        this.provider = provider;
         this.code = code;
         this.playerUuid = playerUuid;
         this.accountName = accountName;
@@ -57,8 +57,8 @@ public final class VerificationSession {
         return purpose;
     }
 
-    public VerificationChannel channel() {
-        return channel;
+    public String provider() {
+        return provider;
     }
 
     public String code() {
@@ -152,7 +152,7 @@ public final class VerificationSession {
         return true;
     }
 
-    /** QQ 渠道完成时由 bot 回报的 QQ 号（未完成时为空）。 */
+    /** 社交渠道完成时由 bot 回报的平台账号（未完成时为空）。 */
     public String resolvedValue() {
         return resolvedValue;
     }

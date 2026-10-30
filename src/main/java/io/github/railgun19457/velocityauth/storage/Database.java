@@ -47,10 +47,13 @@ public final class Database implements AutoCloseable {
         if (!file.isAbsolute()) {
             file = dataDirectory.resolve(sqlite.file()).toAbsolutePath();
         }
-        try {
-            Files.createDirectories(file.getParent());
-        } catch (Exception e) {
-            throw new SQLException("无法创建数据库目录 " + file.getParent(), e);
+        Path parent = file.getParent();
+        if (parent != null) {
+            try {
+                Files.createDirectories(parent);
+            } catch (Exception e) {
+                throw new SQLException("无法创建数据库目录 " + parent, e);
+            }
         }
         String url = "jdbc:sqlite:" + file.toString().replace('\\', '/');
 

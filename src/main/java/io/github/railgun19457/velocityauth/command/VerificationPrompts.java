@@ -2,6 +2,7 @@ package io.github.railgun19457.velocityauth.command;
 
 import com.velocitypowered.api.proxy.Player;
 import io.github.railgun19457.velocityauth.VelocityAuthPlugin;
+import io.github.railgun19457.velocityauth.auth.Provider;
 import io.github.railgun19457.velocityauth.config.VelocityAuthConfig;
 import io.github.railgun19457.velocityauth.verify.VerificationDispatch;
 import io.github.railgun19457.velocityauth.verify.VerificationPurpose;
@@ -17,7 +18,7 @@ public final class VerificationPrompts {
     }
 
     /**
-     * 构造派发回调。QQ 渠道的提示在 {@link #sendQqInstruction} 中单独发送（需要验证码）。
+     * 构造派发回调。社交渠道的提示在 {@link #sendSocialInstruction} 中单独发送（需要验证码）。
      *
      * @param purpose 验证目的，用于把「操作占位符」{@code {action}} 填成注册 / 绑定 / 找回等
      */
@@ -33,9 +34,9 @@ public final class VerificationPrompts {
                                 "minutes", minutes));
                 case EMAIL_FAILED -> player.sendMessage(plugin.lang().msg("verification.email-failed"));
                 case EMAIL_UNAVAILABLE -> player.sendMessage(plugin.lang().msg("verification.email-unavailable"));
-                case QQ_UNAVAILABLE -> player.sendMessage(plugin.lang().msg("verification.qq-unavailable"));
+                case SOCIAL_UNAVAILABLE -> player.sendMessage(plugin.lang().msg("verification.social-unavailable"));
                 case RATE_LIMITED -> player.sendMessage(plugin.lang().msg("verification.rate-limited"));
-                case QQ_WATCHING -> {
+                case SOCIAL_WATCHING -> {
                     // 由调用方在拿到 session 后发送带验证码的提示
                 }
             }
@@ -47,24 +48,27 @@ public final class VerificationPrompts {
         return plugin.lang().rawText(purpose.actionLangKey());
     }
 
-    /** 游戏内出码（点击复制），供玩家粘贴到 QQ 群/私聊。 */
-    public static void sendQqInstruction(VelocityAuthPlugin plugin, Player player, String code,
-                                         VerificationPurpose purpose) {
-        player.sendMessage(plugin.lang().msg("verification.qq-instruction",
-                "action", actionLabel(plugin, purpose), "channels", qqChannels(plugin)));
+    /** 游戏内出码（点击复制），供玩家粘贴到社交渠道。 */
+    public static void sendSocialInstruction(VelocityAuthPlugin plugin, Player player, String providerId,
+                                             String code, VerificationPurpose purpose) {
+        player.sendMessage(plugin.lang().msg("verification.social-instruction",
+                "action", actionLabel(plugin, purpose),
+                "provider", providerName(plugin, providerId),
+                "channels", socialChannels(plugin, providerId)));
         player.sendMessage(plugin.lang().raw("verification.code-line", "code", code));
         player.sendMessage(plugin.lang().msg("verification.code-prompt"));
     }
 
-    /** 收码位置文案：QQ 群号，配置了私聊号时一并展示。 */
-    public static String qqChannels(VelocityAuthPlugin plugin) {
-        String group = plugin.config().qqbot().groupId();
-        StringBuilder out = new StringBuilder("QQ 群 ").append(group == null || group.isBlank() ? "(未配置)" : group);
-        String privateNumber = plugin.config().qqbot().privateNumber();
-        if (privateNumber != null && !privateNumber.isBlank()) {
-            out.append(" / 私聊 ").append(privateNumber);
-        }
-        return out.toString();
+    /** 渠道展示名（未配置时回退为 id）。 */
+    public static String providerName(VelocityAuthPlugin plugin, String providerId) {
+        return Provider.find(plugin.config(), providerId).map(Provider::displayName).orElse(providerId);
+    }
+
+    /** 收码位置文案：渠道名 + bot 上报的监听位置。 */
+    public static String socialChannels(VelocityAuthPlugin plugin, String providerId) {
+        String scope = plugin.botServer() == null ? "" : plugin.botServer().watchScopeDisplay(providerId);
+        String name = providerName(plugin, providerId);
+        return scope == null || scope.isBlank() ? name : name + "（" + scope + "）";
     }
 
     /**

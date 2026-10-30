@@ -113,8 +113,8 @@
       "key": "key_s2c",
       "nonce_b64url": "AAAAAAAAAAAAAAAB",
       "aad": "VELOCITYAUTH-SEAL-V1\nv=1\nseq=1\n",
-      "plaintext": "VELOCITYAUTH-MSG-V1\ntype=verify.watch\nid=r_1\nts=1730000000\ncode=MC-8F3K2A\ngroup_id=123456\nttl=300\n",
-      "ct": "e1dppBTP-82_1MNcxWTKJf7znttgv0mfAlGrpC3gD-TwYSNC3IRdcfBRlfajA9_tB8lgHNoki8bku2rrgx9cnTqHMAYDNdBp6cqnDmQCjopQkXu4i2FpgEMSaE7JagQ-1TrQZBhc3vBirfH8J5voZdMA"
+      "plaintext": "VELOCITYAUTH-MSG-V1\ntype=verify.watch\nid=r_1\nts=1730000000\ncode=MC-8F3K2A\nprovider=qq\nttl=300\n",
+      "ct": "e1dppBTP-82_1MNcxWTKJf7znttgv0mfAlGrpC3gD-TwYSNC3IRdcfBRlfajA9_tB8lgHNoki8bku2rrgx9cnTqHMAYDNdBp6cqwDmQBl7Fch3v4yFgpwRklLwqVXYgPdOr3MHs1p4U2Stwp4ao"
     }
   ]
 }

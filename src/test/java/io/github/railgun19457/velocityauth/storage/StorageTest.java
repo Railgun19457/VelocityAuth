@@ -3,8 +3,9 @@ package io.github.railgun19457.velocityauth.storage;
 import io.github.railgun19457.velocityauth.config.VelocityAuthConfig;
 import io.github.railgun19457.velocityauth.storage.model.Account;
 import io.github.railgun19457.velocityauth.storage.model.AccountStatus;
-import io.github.railgun19457.velocityauth.storage.model.BindingType;
+import io.github.railgun19457.velocityauth.storage.model.BindingHistory;
 import io.github.railgun19457.velocityauth.storage.model.IdentityKind;
+import io.github.railgun19457.velocityauth.storage.model.LoginHistory;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -13,6 +14,8 @@ import org.junit.jupiter.api.io.TempDir;
 import org.slf4j.helpers.NOPLogger;
 
 import java.nio.file.Path;
+import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -44,7 +47,7 @@ class StorageTest {
         return new VelocityAuthConfig.Database(
                 VelocityAuthConfig.Database.Type.SQLITE,
                 new VelocityAuthConfig.Sqlite("test.db"),
-                new VelocityAuthConfig.Mysql("127.0.0.1", 3306, "x", "root", ""));
+                new VelocityAuthConfig.Mysql("127.0.0.1", 3306, "x", "root", ""), 90, 90, 90);
     }
 
     @Test
@@ -94,24 +97,24 @@ class StorageTest {
         long a = storage.accounts().insert("A", "a", UUID.randomUUID(), "h", AccountStatus.ACTIVE, null, 1L);
         long b = storage.accounts().insert("B", "b", UUID.randomUUID(), "h", AccountStatus.ACTIVE, null, 1L);
 
-        storage.bindings().insert(a, BindingType.EMAIL, "a@qq.com", 1L, 1L);
-        storage.bindings().insert(b, BindingType.EMAIL, "a@qq.com", 1L, 1L);
+        storage.bindings().insert(a, "email", "a@qq.com", 1L, 1L);
+        storage.bindings().insert(b, "email", "a@qq.com", 1L, 1L);
 
-        assertEquals(2, storage.bindings().countDistinctAccounts(BindingType.EMAIL, "a@qq.com"));
-        assertTrue(storage.bindings().exists(a, BindingType.EMAIL, "a@qq.com"));
-        assertFalse(storage.bindings().exists(a, BindingType.QQ, "10001"));
+        assertEquals(2, storage.bindings().countDistinctAccounts("email", "a@qq.com"));
+        assertTrue(storage.bindings().exists(a, "email", "a@qq.com"));
+        assertFalse(storage.bindings().exists(a, "qq", "10001"));
         assertEquals(1, storage.bindings().findByAccountId(a).size());
 
-        storage.bindings().delete(a, BindingType.EMAIL);
-        assertFalse(storage.bindings().exists(a, BindingType.EMAIL, "a@qq.com"));
-        assertEquals(1, storage.bindings().countDistinctAccounts(BindingType.EMAIL, "a@qq.com"));
+        storage.bindings().delete(a, "email");
+        assertFalse(storage.bindings().exists(a, "email", "a@qq.com"));
+        assertEquals(1, storage.bindings().countDistinctAccounts("email", "a@qq.com"));
     }
 
     @Test
     void cascadeDeleteRemovesChildren() {
         long accountId = storage.accounts().insert("C", "c", UUID.randomUUID(), "h", AccountStatus.ACTIVE, null, 1L);
         storage.identities().upsert(accountId, IdentityKind.JAVA, "c", 1L);
-        storage.bindings().insert(accountId, BindingType.QQ, "10002", 1L, 1L);
+        storage.bindings().insert(accountId, "qq", "10002", 1L, 1L);
         storage.sessions().insert(accountId, "10.0.0.1", 1L, 100L);
 
         storage.accounts().delete(accountId);
@@ -145,6 +148,65 @@ class StorageTest {
     }
 
     @Test
+    void loginHistoryRecordsFiltersAndPrunes() {
+        long accountId = storage.accounts().insert("H", "h", UUID.randomUUID(), "h", AccountStatus.ACTIVE, null, 1L);
+        storage.loginHistory().insert(accountId, 100L, "1.2.3.4", LoginHistory.SUCCESS, "h", null);
+        storage.loginHistory().insert(accountId, 200L, "1.2.3.4", LoginHistory.FAILED, "h", "reason=wrong_password");
+        storage.loginHistory().insert(null, 210L, "5.6.7.8", LoginHistory.FAILED, "ghost", "reason=not_found");
+        storage.loginHistory().insert(accountId, 300L, "9.9.9.9", LoginHistory.LOGOUT, "h", "connection");
+
+        assertEquals(4, storage.loginHistory().count());
+        assertEquals(3, storage.loginHistory().findByAccountId(accountId, null, 0, 10).size());
+        assertEquals(1, storage.loginHistory().findByAccountId(accountId, LoginHistory.FAILED, 0, 10).size());
+        assertEquals(1, storage.loginHistory().findByAccountId(accountId, null, 250L, 10).size());
+        assertEquals(List.of(accountId), storage.loginHistory().distinctAccountIdsByIp("1.2.3.4", 10));
+
+        storage.accounts().updateLastLogin(accountId, 300L, "9.9.9.9");
+        assertEquals(1, storage.accounts().findByLastIp("9.9.9.9", 10).size());
+
+        // 只删 at < 200 的那一条
+        assertEquals(1, storage.loginHistory().prune(200L));
+        assertEquals(3, storage.loginHistory().count());
+    }
+
+    @Test
+    void bindingHistoryPersistsAfterAccountDeletion() {
+        long accountId = storage.accounts().insert("BH", "bh", UUID.randomUUID(), "h",
+                AccountStatus.ACTIVE, null, 1L);
+        storage.bindingHistory().insert(accountId, "email", "bh@qq.com",
+                BindingHistory.BIND, 100L, "1.1.1.1");
+        storage.bindingHistory().insert(accountId, "email", "bh@qq.com",
+                BindingHistory.UNBIND, 200L, "1.1.1.1");
+
+        assertEquals(2, storage.bindingHistory().findByIdentifier("email", "bh@qq.com", 10).size());
+        assertEquals(200L, storage.bindingHistory().lastReleaseAt("email", "bh@qq.com"));
+        assertEquals(0L, storage.bindingHistory().lastReleaseAt("qq", "10001"));
+
+        // 账号删除后绑定历史仍在（无外键级联）
+        storage.accounts().delete(accountId);
+        assertEquals(2, storage.bindingHistory().findByIdentifier("email", "bh@qq.com", 10).size());
+    }
+
+    @Test
+    void historyTablesPruneByCutoff() {
+        long accountId = storage.accounts().insert("P", "p", UUID.randomUUID(), "h",
+                AccountStatus.ACTIVE, null, 1L);
+        storage.audit().log(100L, accountId, "login", "1.1.1.1", null);
+        storage.audit().log(300L, accountId, "logout", "1.1.1.1", null);
+        storage.bindingHistory().insert(accountId, "email", "p@qq.com",
+                BindingHistory.BIND, 100L, "1.1.1.1");
+        storage.bindingHistory().insert(accountId, "email", "p@qq.com",
+                BindingHistory.UNBIND, 300L, "1.1.1.1");
+
+        assertEquals(1, storage.audit().prune(200L));
+        assertEquals(1, storage.bindingHistory().prune(200L));
+        assertEquals(1, storage.audit().count());
+        assertEquals(1, storage.bindingHistory().count());
+        // 释放记录仍在 → 冷却判定不受影响
+        assertEquals(300L, storage.bindingHistory().lastReleaseAt("email", "p@qq.com"));
+    }
+
+    @Test
     void schemaMigrationIsIdempotent() {
         // 重复迁移不应报错，版本保持
         Schema.migrate(storage.database(), NOPLogger.NOP_LOGGER);
@@ -155,22 +217,23 @@ class StorageTest {
     @Test
     void createAccountWritesAccountIdentityAndBindingsAtomically() {
         long id = storage.createAccount("Zoe", "zoe", UUID.randomUUID(), "$2a$10$h",
-                AccountStatus.ACTIVE, null, 500L, IdentityKind.JAVA, "zoe", "zoe@qq.com", "10009");
+                AccountStatus.ACTIVE, null, 500L, IdentityKind.JAVA, "zoe",
+                Map.of("email", "zoe@qq.com", "qq", "10009"));
 
         assertEquals("Zoe", storage.accounts().findById(id).orElseThrow().name());
         assertEquals(id, storage.identities().find(IdentityKind.JAVA, "zoe").orElseThrow().accountId());
         assertEquals("zoe@qq.com",
-                storage.bindings().find(id, BindingType.EMAIL).orElseThrow().identifier());
-        assertEquals("10009", storage.bindings().find(id, BindingType.QQ).orElseThrow().identifier());
+                storage.bindings().find(id, "email").orElseThrow().identifier());
+        assertEquals("10009", storage.bindings().find(id, "qq").orElseThrow().identifier());
     }
 
     @Test
     void createAccountRollsBackEverythingOnFailure() {
         storage.createAccount("Dup", "dup", UUID.randomUUID(), "h", AccountStatus.ACTIVE, null, 1L,
-                IdentityKind.JAVA, "dup", null, null);
+                IdentityKind.JAVA, "dup", Map.of());
 
         assertThrows(StorageException.class, () -> storage.createAccount("Dup2", "dup", UUID.randomUUID(), "h",
-                AccountStatus.ACTIVE, null, 2L, IdentityKind.JAVA, "dup2", "dup2@qq.com", null));
+                AccountStatus.ACTIVE, null, 2L, IdentityKind.JAVA, "dup2", Map.of("email", "dup2@qq.com")));
 
         // 名称冲突导致整体回滚：不应残留身份 / 绑定 / 第二个账号
         assertEquals(1, storage.accounts().count());

@@ -89,21 +89,20 @@ public abstract class PlayerCommandSupport implements SimpleCommand {
                 && registry.get(player).map(AuthSession::authenticated).orElse(false);
     }
 
-    /** 绑定渠道的可选值（补全用）。 */
-    private static final java.util.List<String> BINDING_CHANNELS = java.util.List.of("email", "qq");
+    /** 内置渠道（当插件上下文不可用时作为补全兜底）。 */
+    private static final java.util.List<String> DEFAULT_CHANNELS = java.util.List.of("email", "qq");
 
-    /**
-     * 在指定参数位补全 {@code email} / {@code qq}。
-     * <p>
-     * 只在玩家正输入该位置时给建议；账号名等参数不做补全（避免暴露哪些账号存在）。
-     */
+    /** 在指定参数位补全已配置的绑定渠道 id（email / 各社交渠道）。 */
     protected java.util.List<String> suggestBindingChannel(Invocation invocation, int index) {
         String[] args = invocation.arguments();
         if (args.length != index + 1) {
             return java.util.List.of();
         }
         String prefix = args[index] == null ? "" : args[index].toLowerCase(java.util.Locale.ROOT);
-        return BINDING_CHANNELS.stream().filter(value -> value.startsWith(prefix)).toList();
+        java.util.List<String> ids = plugin == null
+                ? DEFAULT_CHANNELS
+                : io.github.railgun19457.velocityauth.auth.Provider.ids(plugin.config());
+        return ids.stream().filter(value -> value.startsWith(prefix)).toList();
     }
 
     /**
@@ -112,16 +111,12 @@ public abstract class PlayerCommandSupport implements SimpleCommand {
      * 只按配置输出可用的渠道行；未配置要求时不输出任何内容。
      */
     protected void sendBindingRequirement(Player player) {
-        java.util.List<io.github.railgun19457.velocityauth.storage.model.BindingType> required =
-                plugin.config().registration().requireBinding();
+        java.util.List<String> required = plugin.config().registration().requireBinding();
         if (required.isEmpty()) {
             return;
         }
-        if (required.contains(io.github.railgun19457.velocityauth.storage.model.BindingType.EMAIL)) {
-            player.sendMessage(plugin.lang().msg("command.bind.required-email"));
-        }
-        if (required.contains(io.github.railgun19457.velocityauth.storage.model.BindingType.QQ)) {
-            player.sendMessage(plugin.lang().msg("command.bind.required-qq"));
+        for (String providerId : required) {
+            player.sendMessage(plugin.lang().msg("command.bind.required", "provider", providerId));
         }
     }
 

@@ -149,7 +149,7 @@ check('sealed 帧 nonce/AAD/密文/解密全部一致', sealedOk)
 const watch = parseMessage(Buffer.from(session.sealed[2].plaintext, 'utf8'))
 check('内层明文解析正确',
   watch.type === 'verify.watch' && watch.payload.code === 'MC-8F3K2A'
-  && watch.payload.group_id === '123456' && watch.payload.ttl === '300')
+  && watch.payload.provider === 'qq' && watch.payload.ttl === '300')
 
 console.log(failures === 0
   ? '\n参考实现：全部测试向量通过'

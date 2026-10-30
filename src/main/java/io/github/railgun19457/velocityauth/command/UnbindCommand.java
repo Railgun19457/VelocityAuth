@@ -4,19 +4,19 @@ import com.velocitypowered.api.proxy.Player;
 import io.github.railgun19457.velocityauth.VelocityAuthPlugin;
 import io.github.railgun19457.velocityauth.auth.AuthSession;
 import io.github.railgun19457.velocityauth.auth.AuthSessionRegistry;
+import io.github.railgun19457.velocityauth.auth.Provider;
 import io.github.railgun19457.velocityauth.storage.model.Account;
 import io.github.railgun19457.velocityauth.storage.model.Binding;
-import io.github.railgun19457.velocityauth.storage.model.BindingType;
-import io.github.railgun19457.velocityauth.verify.VerificationChannel;
 import io.github.railgun19457.velocityauth.verify.VerificationPurpose;
 import io.github.railgun19457.velocityauth.verify.VerificationRequest;
 import io.github.railgun19457.velocityauth.verify.VerificationService;
 
+import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 
 /**
- * {@code /unbind <email|qq>} —— 需先通过一次验证（DESIGN 6.4）。
+ * {@code /unbind <渠道>} —— 需先通过一次验证（DESIGN 6.4）。
  */
 public final class UnbindCommand extends PlayerCommandSupport {
 
@@ -37,46 +37,48 @@ public final class UnbindCommand extends PlayerCommandSupport {
             return;
         }
         String[] args = invocation.arguments();
-        BindingType type = args.length >= 1 ? BindingType.fromName(args[0]) : null;
-        if (type == null) {
+        Optional<Provider> provider = args.length >= 1
+                ? Provider.find(plugin.config(), args[0].toLowerCase(Locale.ROOT)) : Optional.empty();
+        if (provider.isEmpty()) {
             player.sendMessage(plugin.lang().msg("command.unbind.usage"));
             return;
         }
-        Optional<Binding> binding = plugin.bindings().binding(account.id(), type);
+        String providerId = provider.get().id();
+        Optional<Binding> binding = plugin.bindings().binding(account.id(), providerId);
         if (binding.isEmpty()) {
             player.sendMessage(plugin.lang().msg("command.unbind.not-bound"));
             return;
         }
         // 不允许把账号解绑成「不满足注册后必须绑定要求」的状态
-        if (plugin.config().registration().requireBinding().contains(type)
-                && !plugin.authService().bindingSatisfiedWithout(account, type)) {
-            player.sendMessage(plugin.lang().msg("command.unbind.required", "type", type.dbValue()));
+        if (plugin.config().registration().requireBinding().contains(providerId)
+                && !plugin.authService().bindingSatisfiedWithout(account, providerId)) {
+            player.sendMessage(plugin.lang().msg("command.unbind.required",
+                    "provider", provider.get().displayName()));
             return;
         }
+        boolean email = provider.get().email();
         String target = binding.get().identifier();
         String ip = ipOf(player);
-        VerificationChannel channel = type == BindingType.EMAIL
-                ? VerificationChannel.EMAIL : VerificationChannel.QQ;
         VerificationService.Start start = plugin.verifications().start(VerificationRequest
-                .builder(VerificationPurpose.UNBIND, channel, player.getUniqueId())
+                .builder(VerificationPurpose.UNBIND, providerId, player.getUniqueId())
                 .accountName(account.nameLower())
                 .connectionName(identityOf(player).identifier())
                 .ip(ip)
-                .target(channel == VerificationChannel.EMAIL ? target : null)
-                .data(Map.of("account_id", Long.toString(account.id()), "type", type.dbValue()))
-                .onDispatch(VerificationPrompts.dispatchHandler(plugin, player,
-                        channel == VerificationChannel.EMAIL ? target : null, VerificationPurpose.UNBIND))
+                .target(email ? target : null)
+                .data(Map.of("account_id", Long.toString(account.id()), "provider", providerId))
+                .onDispatch(VerificationPrompts.dispatchHandler(plugin, player, email ? target : null,
+                        VerificationPurpose.UNBIND))
                 .build());
         if (!start.accepted()) {
             return;
         }
-        if (channel == VerificationChannel.QQ) {
-            VerificationPrompts.sendQqInstruction(plugin, player, start.session().code(),
+        if (!email) {
+            VerificationPrompts.sendSocialInstruction(plugin, player, providerId, start.session().code(),
                     VerificationPurpose.UNBIND);
         }
         start.completion().thenAccept(result -> {
             switch (result.status()) {
-                case COMPLETED -> plugin.bindings().unbind(account, type, ip)
+                case COMPLETED -> plugin.bindings().unbind(account, providerId, ip)
                         .thenAccept(outcome -> player.sendMessage(
                                 outcome.ok() ? plugin.lang().msg("command.unbind.success")
                                         : plugin.lang().msg("command.unbind.not-bound")));
@@ -90,7 +92,7 @@ public final class UnbindCommand extends PlayerCommandSupport {
 
     @Override
     public java.util.List<String> suggest(Invocation invocation) {
-        // /unbind <email|qq>
+        // /unbind <渠道>
         return suggestBindingChannel(invocation, 0);
     }
 

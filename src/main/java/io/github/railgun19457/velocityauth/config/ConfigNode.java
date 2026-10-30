@@ -32,6 +32,21 @@ public final class ConfigNode {
         return map.containsKey(key);
     }
 
+    /**
+     * 枚举本节点的子段（值本身是映射的键）。用于 {@code binding.social.<id>} 这类动态子段。
+     */
+    @SuppressWarnings("unchecked")
+    public Map<String, ConfigNode> children() {
+        Map<String, ConfigNode> out = new java.util.LinkedHashMap<>();
+        for (Map.Entry<String, Object> entry : map.entrySet()) {
+            if (entry.getValue() instanceof Map) {
+                out.put(entry.getKey(),
+                        new ConfigNode(childPath(entry.getKey()), (Map<String, Object>) entry.getValue()));
+            }
+        }
+        return out;
+    }
+
     /** 子节点；不存在时返回空节点，使调用方可以继续用默认值。 */
     @SuppressWarnings("unchecked")
     public ConfigNode section(String key) {

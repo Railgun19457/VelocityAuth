@@ -6,8 +6,10 @@ import io.github.railgun19457.velocityauth.storage.StorageService;
 import io.github.railgun19457.velocityauth.storage.model.Account;
 import io.github.railgun19457.velocityauth.storage.model.AccountStatus;
 import io.github.railgun19457.velocityauth.storage.model.AuditEntry;
-import io.github.railgun19457.velocityauth.storage.model.BindingType;
+import io.github.railgun19457.velocityauth.storage.model.Binding;
+import io.github.railgun19457.velocityauth.storage.model.BindingHistory;
 import io.github.railgun19457.velocityauth.storage.model.Identity;import io.github.railgun19457.velocityauth.storage.model.IdentityKind;
+import io.github.railgun19457.velocityauth.storage.model.LoginHistory;
 import io.github.railgun19457.velocityauth.storage.model.LoginSession;
 import io.github.railgun19457.velocityauth.util.AsyncExecutor;
 import io.github.railgun19457.velocityauth.util.PluginLogger;
@@ -153,7 +155,7 @@ public final class AuthService {
                 long now = nowSeconds();
                 long accountId = storage.createAccount(name, nameLower, ProfileFactory.offlineUuid(name),
                         hash, status, null, now, identity.kind(), identity.identifier(),
-                        null, null);
+                        java.util.Map.of());
                 storage.audit().log(now, accountId, AuditEntry.REGISTER, ip,
                         "connection=" + identity.identifier() + " kind=" + identity.kind().dbValue()
                                 + " status=" + status.dbValue());
@@ -192,16 +194,22 @@ public final class AuthService {
                 if (account == null) {
                     // 仍执行一次 bcrypt，抹平响应时间差异
                     hasher.verify(password, dummyHash);
+                    recordLoginHistory(null, ip, LoginHistory.FAILED, identity.identifier(),
+                            "reason=not_found name=" + name);
                     return AuthOutcomes.Login.failure(AuthOutcomes.LoginStatus.WRONG_PASSWORD);
                 }
                 if (account.locked()) {
                     // 同样执行一次 bcrypt，避免"锁定"状态可通过耗时区分
                     hasher.verify(password, dummyHash);
+                    recordLoginHistory(account.id(), ip, LoginHistory.FAILED, identity.identifier(),
+                            "reason=locked");
                     return AuthOutcomes.Login.failure(AuthOutcomes.LoginStatus.LOCKED);
                 }
                 if (!hasher.verify(password, account.passwordHash())) {
                     storage.audit().log(nowSeconds(), account.id(), AuditEntry.LOGIN_FAILED, ip,
                             "connection=" + identity.identifier());
+                    recordLoginHistory(account.id(), ip, LoginHistory.FAILED, identity.identifier(),
+                            "reason=wrong_password");
                     return AuthOutcomes.Login.failure(AuthOutcomes.LoginStatus.WRONG_PASSWORD);
                 }
                 // 密码正确但未满足「注册后必须绑定」的要求：不放行，提示先绑定
@@ -213,6 +221,7 @@ public final class AuthService {
                 storage.accounts().updateLastLogin(account.id(), now, ip);
                 storage.identities().upsert(account.id(), identity.kind(), identity.identifier(), now);
                 storage.audit().log(now, account.id(), AuditEntry.LOGIN, ip, "connection=" + identity.identifier());
+                recordLoginHistory(account.id(), ip, LoginHistory.SUCCESS, identity.identifier(), null);
 
                 Account refreshed = storage.accounts().findById(account.id()).orElse(account);
                 cache.put(refreshed);
@@ -224,6 +233,19 @@ public final class AuthService {
                 return AuthOutcomes.Login.failure(AuthOutcomes.LoginStatus.ERROR);
             }
         });
+    }
+
+    /**
+     * 记录一条登录历史（成功 / 失败）。登出记录由断开/命令路径写入。
+     * <p>
+     * 失败记录会尽力而为：写库异常只记日志，不影响登录结果。
+     */
+    private void recordLoginHistory(Long accountId, String ip, String result, String identity, String detail) {
+        try {
+            storage.loginHistory().insert(accountId, nowSeconds(), ip, result, identity, detail);
+        } catch (RuntimeException e) {
+            log.warn("记录登录历史失败：{}", e.getMessage());
+        }
     }
 
     // ------------------------------------------------------------------ 注册后绑定要求
@@ -241,13 +263,13 @@ public final class AuthService {
     }
 
     /**
-     * 若解绑 {@code removed} 渠道，账号是否仍满足绑定要求。
+     * 若解绑 {@code providerId} 渠道，账号是否仍满足绑定要求。
      * <p>
      * 用于 {@code /unbind} 的前置校验：不允许把账号解绑成「不满足要求」的状态。
      */
-    public boolean bindingSatisfiedWithout(Account account, BindingType removed) {
-        List<BindingType> remaining = config.get().registration().requireBinding().stream()
-                .filter(type -> type != removed)
+    public boolean bindingSatisfiedWithout(Account account, String providerId) {
+        List<String> remaining = config.get().registration().requireBinding().stream()
+                .filter(id -> !id.equals(providerId))
                 .toList();
         return bindingIndex.satisfies(account.id(), remaining);
     }
@@ -264,12 +286,25 @@ public final class AuthService {
      * @return 是否确实删除了账号
      */
     public CompletableFuture<Boolean> deleteAccount(long accountId, String ip, String detail) {
+        return deleteAccount(accountId, ip, AuditEntry.DELETE_ACCOUNT, detail);
+    }
+
+    /**
+     * 删除账号（级联删除身份 / 绑定 / 会话），并同步清理内存索引。
+     * <p>
+     * 删除前先把当前绑定记为「释放」写入 {@code binding_history}，使 QQ/邮箱在注销后仍可追溯、
+     * 并触发再绑定冷却。
+     *
+     * @return 是否确实删除了账号
+     */
+    public CompletableFuture<Boolean> deleteAccount(long accountId, String ip, String action, String detail) {
         return async.supply(() -> {
             try {
+                recordBindingRelease(accountId, ip, BindingHistory.DELETE);
                 int removed = storage.accounts().delete(accountId);
                 if (removed > 0) {
                     forgetAccount(accountId);
-                    storage.audit().log(nowSeconds(), null, AuditEntry.DELETE_ACCOUNT, ip, detail);
+                    storage.audit().log(nowSeconds(), null, action, ip, detail);
                 }
                 return removed > 0;
             } catch (RuntimeException e) {
@@ -277,6 +312,18 @@ public final class AuthService {
                 return false;
             }
         });
+    }
+
+    /** 把账号当前的所有绑定记为「释放」（解绑 / 注销），写入绑定历史。 */
+    private void recordBindingRelease(long accountId, String ip, String action) {
+        try {
+            long now = nowSeconds();
+            for (Binding binding : storage.bindings().findByAccountId(accountId)) {
+                storage.bindingHistory().insert(accountId, binding.type(), binding.identifier(), action, now, ip);
+            }
+        } catch (RuntimeException e) {
+            log.warn("记录绑定释放历史失败：{}", e.getMessage());
+        }
     }
 
     /**
@@ -548,6 +595,35 @@ public final class AuthService {
                 log.warn("清理过期会话失败：{}", e.getMessage());
             }
         });
+        purgeTimeSeries(now);
+    }
+
+    /**
+     * 按 {@code database.*-days} 清理有时效性的历史表（登录历史 / 审计日志 / 绑定历史）；
+     * 0 表示永久保留。绑定历史即使被清理，也不影响已生效的冷却窗口（冷却通常远短于保留期）。
+     */
+    private void purgeTimeSeries(long now) {
+        VelocityAuthConfig.Database db = config.get().database();
+        prune("登录历史", db.loginHistoryDays(), now, storage.loginHistory()::prune);
+        prune("审计日志", db.auditLogDays(), now, storage.audit()::prune);
+        prune("绑定历史", db.bindingHistoryDays(), now, storage.bindingHistory()::prune);
+    }
+
+    private void prune(String label, int days, long now, java.util.function.LongFunction<Integer> prune) {
+        if (days <= 0) {
+            return;
+        }
+        long cutoff = now - days * 86_400L;
+        async.run(() -> {
+            try {
+                int removed = prune.apply(cutoff);
+                if (removed > 0) {
+                    log.debug("已清理 {} 条过期{}（早于 {} 天前）", removed, label, days);
+                }
+            } catch (RuntimeException e) {
+                log.warn("清理{}失败：{}", label, e.getMessage());
+            }
+        });
     }
 
     /**
@@ -566,6 +642,7 @@ public final class AuthService {
             try {
                 List<Account> stale = storage.accounts().findPendingOlderThan(cutoff);
                 for (Account account : stale) {
+                    recordBindingRelease(account.id(), null, BindingHistory.DELETE);
                     storage.accounts().delete(account.id());
                     forgetAccount(account.id());
                     log.info("未绑定账号超时清除：{}（注册于 {}，TTL {} 分钟）",

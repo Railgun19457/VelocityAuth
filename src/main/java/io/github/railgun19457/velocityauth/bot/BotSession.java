@@ -38,14 +38,15 @@ public final class BotSession {
         CLOSED
     }
 
-    public static final List<String> SERVER_CAPABILITIES = List.of("verify.v1");
     public static final String CAPABILITY_VERIFY = "verify.v1";
+    public static final String CAPABILITY_QUERY = "query.v1";
 
     private final WebSocket connection;
     private final KeyStore keyStore;
     private final PairingService pairingService;
     private final BotCallbacks callbacks;
     private final PluginLogger log;
+    private final List<String> serverCapabilities;
 
     private final Set<String> seenIds = new HashSet<>();
     private final AtomicLong frameCounter = new AtomicLong();
@@ -54,6 +55,10 @@ public final class BotSession {
     private String sessionId;
     private String clientId;
     private String clientKeyId;
+    /** bot 服务的渠道 id（握手声明）。 */
+    private String provider;
+    /** bot 上报的监听位置展示串（可选）。 */
+    private String scopes;
 
     // ---- 配对上下文 ----
     private String pairingId;
@@ -64,25 +69,26 @@ public final class BotSession {
     private List<String> clientCapabilities = List.of();
     private String pairChallengeId;
     private String pairServerNonce;
-    private long pairChallengeExpiresAt;
+    private volatile long pairChallengeExpiresAt;
 
     // ---- 会话上下文 ----
     private byte[] clientEphemeralKey;
     private String clientNonce;
     private String authChallengeId;
     private String authServerNonce;
-    private long authChallengeExpiresAt;
+    private volatile long authChallengeExpiresAt;
     private PrivateKey serverEphemeralPrivate;
     private byte[] serverEphemeralPublic;
-    private Sealer.Outbound outbound;
-    private Sealer.Inbound inbound;
-    private long lastActivityAt = System.currentTimeMillis();
+    private volatile Sealer.Outbound outbound;
+    private volatile Sealer.Inbound inbound;
+    private volatile long lastActivityAt = System.currentTimeMillis();
 
     public BotSession(WebSocket connection, KeyStore keyStore, PairingService pairingService,
-                      BotCallbacks callbacks, PluginLogger log) {
+                      List<String> serverCapabilities, BotCallbacks callbacks, PluginLogger log) {
         this.connection = connection;
         this.keyStore = keyStore;
         this.pairingService = pairingService;
+        this.serverCapabilities = List.copyOf(serverCapabilities);
         this.callbacks = callbacks;
         this.log = log;
     }
@@ -93,7 +99,12 @@ public final class BotSession {
         void onClosed(BotSession session);
 
         /** @return 是否消费了该验证码 */
-        boolean onVerifyMatched(String code, String qq, String groupId, boolean groupMember);
+        boolean onVerifyMatched(String providerId, String code, String subject, String scope, String displayName);
+
+        /** 处理一条 {@code query.*} 业务消息；返回 {@code null} 表示查询接口未启用。 */
+        default QueryResponse onQuery(String type, Map<String, Object> payload) {
+            return null;
+        }
 
         /** 握手帧允许的时间偏差（秒）。 */
         default int clockSkewSeconds() {
@@ -225,6 +236,8 @@ public final class BotSession {
         this.clientKeyId = frame.str("client_key_id");
         this.clientPublicKey = publicKey;
         this.clientCapabilities = frame.strings("capabilities");
+        this.provider = frame.str("provider");
+        this.scopes = frame.str("scopes");
         this.state = State.AWAIT_PAIR_PROVE;
 
         String challengeId = "ch_" + UUID.randomUUID().toString().replace("-", "").substring(0, 12);
@@ -243,7 +256,7 @@ public final class BotSession {
         payload.put("server_public_key", Base64Url.encode(keyStore.publicKey()));
         payload.put("server_nonce", serverNonce);
         payload.put("selected_v", Frame.VERSION);
-        payload.put("capabilities", SERVER_CAPABILITIES);
+        payload.put("capabilities", serverCapabilities);
         sendPlain("pair.challenge", payload, pairingCode);
     }
 
@@ -278,14 +291,14 @@ public final class BotSession {
         requireEquals(frame.str("client_capabilities_sha256"),
                 Transcript.capabilitiesSha256(clientCapabilities), "client_capabilities_sha256");
         requireEquals(frame.str("server_capabilities_sha256"),
-                Transcript.capabilitiesSha256(SERVER_CAPABILITIES), "server_capabilities_sha256");
+                Transcript.capabilitiesSha256(serverCapabilities), "server_capabilities_sha256");
         Long selectedV = frame.number("selected_v");
         if (selectedV == null || selectedV != Frame.VERSION) {
             throw new ProtocolException(ProtocolException.VERSION_UNSUPPORTED, "selected_v 不匹配");
         }
 
         String fingerprint = Hashes.sha256B64Url(clientPublicKey);
-        keyStore.pair(new KeyStore.PairedClient(clientId, clientKeyId, clientPublicKey, fingerprint,
+        keyStore.pair(new KeyStore.PairedClient(clientId, clientKeyId, provider, clientPublicKey, fingerprint,
                 System.currentTimeMillis() / 1000L, System.currentTimeMillis() / 1000L));
         pairingService.consume(pairingId);
 
@@ -300,7 +313,7 @@ public final class BotSession {
         payload.put("server_key_fingerprint", keyStore.fingerprint());
         payload.put("server_time", System.currentTimeMillis() / 1000L);
         payload.put("selected_v", Frame.VERSION);
-        payload.put("capabilities", SERVER_CAPABILITIES);
+        payload.put("capabilities", serverCapabilities);
         sendPlain("pair.complete", payload, pairingCode);
 
         log.info("bot 配对完成：client_id={} key_id={}", clientId, clientKeyId);
@@ -344,6 +357,8 @@ public final class BotSession {
         this.clientEphemeralKey = ephemeralRaw;
         this.clientNonce = frame.str("client_nonce");
         this.clientCapabilities = frame.strings("capabilities");
+        this.provider = frame.str("provider");
+        this.scopes = frame.str("scopes");
         this.helloId = frame.id();
 
         var ephemeralPair = Crypto.x25519Generate();
@@ -367,7 +382,7 @@ public final class BotSession {
         payload.put("server_ephemeral_key", Base64Url.encode(serverEphemeralPublic));
         payload.put("server_nonce", serverNonce);
         payload.put("selected_v", Frame.VERSION);
-        payload.put("capabilities", SERVER_CAPABILITIES);
+        payload.put("capabilities", serverCapabilities);
         sendPlain("auth.challenge", payload, null);
     }
 
@@ -401,7 +416,7 @@ public final class BotSession {
         requireEquals(frame.str("client_capabilities_sha256"),
                 Transcript.capabilitiesSha256(clientCapabilities), "client_capabilities_sha256");
         requireEquals(frame.str("server_capabilities_sha256"),
-                Transcript.capabilitiesSha256(SERVER_CAPABILITIES), "server_capabilities_sha256");
+                Transcript.capabilitiesSha256(serverCapabilities), "server_capabilities_sha256");
         Long selectedV = frame.number("selected_v");
         if (selectedV == null || selectedV != Frame.VERSION) {
             throw new ProtocolException(ProtocolException.VERSION_UNSUPPORTED, "selected_v 不匹配");
@@ -421,7 +436,7 @@ public final class BotSession {
         payload.put("ok", true);
         payload.put("session_id", sessionId);
         payload.put("server_time", System.currentTimeMillis() / 1000L);
-        payload.put("capabilities", SERVER_CAPABILITIES);
+        payload.put("capabilities", serverCapabilities);
         sendSealed("auth.result", payload);
     }
 
@@ -453,6 +468,8 @@ public final class BotSession {
             case "verify.watch.ack" -> log.debug("bot 已登记验证码：accepted={}",
                     message.payload().get("accepted"));
             case "verify.matched" -> handleVerifyMatched(message);
+            case "query.account", "query.lookup", "query.history", "query.binding-history", "query.stats" ->
+                    handleQuery(message);
             case "error" -> log.warn("bot 报告错误：{} {}",
                     message.payload().get("code"), message.payload().get("message"));
             default -> log.debug("忽略未知业务消息：{}", message.type());
@@ -461,16 +478,37 @@ public final class BotSession {
 
     private void handleVerifyMatched(Transcript.ParsedMessage message) {
         String code = String.valueOf(message.payload().get("code"));
-        String qq = String.valueOf(message.payload().get("qq"));
-        String groupId = String.valueOf(message.payload().get("group_id"));
-        Object member = message.payload().get("is_group_member");
-        boolean groupMember = member instanceof Boolean bool ? bool : Boolean.parseBoolean(String.valueOf(member));
+        String subject = str(message.payload().get("subject"));
+        String scope = str(message.payload().get("scope"));
+        String displayName = str(message.payload().get("display_name"));
 
-        boolean consumed = callbacks.onVerifyMatched(code, qq, groupId, groupMember);
+        boolean consumed = callbacks.onVerifyMatched(provider, code, subject, scope, displayName);
         Map<String, Object> payload = new LinkedHashMap<>();
         payload.put("code", code);
         payload.put("consumed", consumed);
         sendSealed("verify.matched.ack", payload);
+    }
+
+    private static String str(Object value) {
+        return value == null ? null : String.valueOf(value);
+    }
+
+    private void handleQuery(Transcript.ParsedMessage message) {
+        QueryResponse response = callbacks.onQuery(message.type(), message.payload());
+        if (response == null) {
+            sendSealed("error", Map.of("code", "query_disabled", "message", "查询接口未启用",
+                    "request_id", message.id()));
+            return;
+        }
+        if (response.isError()) {
+            sendSealed("error", Map.of("code", response.errorCode(),
+                    "message", response.errorMessage() == null ? "" : response.errorMessage(),
+                    "request_id", message.id()));
+            return;
+        }
+        Map<String, Object> payload = new LinkedHashMap<>(response.payload());
+        payload.put("request_id", message.id());
+        sendSealed(message.type() + ".result", payload);
     }
 
     // ------------------------------------------------------------------ 发送
@@ -588,6 +626,16 @@ public final class BotSession {
 
     public String clientId() {
         return clientId;
+    }
+
+    /** bot 服务的渠道 id（握手声明；可能为空）。 */
+    public String provider() {
+        return provider;
+    }
+
+    /** bot 上报的监听位置展示串（可能为空）。 */
+    public String scopes() {
+        return scopes;
     }
 
     public String sessionId() {

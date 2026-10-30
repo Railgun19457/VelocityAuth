@@ -7,11 +7,10 @@ import io.github.railgun19457.velocityauth.lang.LangService;
 import io.github.railgun19457.velocityauth.mail.MailSender;
 import io.github.railgun19457.velocityauth.storage.StorageService;
 import io.github.railgun19457.velocityauth.storage.model.AccountStatus;
-import io.github.railgun19457.velocityauth.storage.model.BindingType;
 import io.github.railgun19457.velocityauth.util.AsyncExecutor;
 import io.github.railgun19457.velocityauth.util.PluginLogger;
 import io.github.railgun19457.velocityauth.mail.EmailTemplateService;
-import io.github.railgun19457.velocityauth.verify.QqVerificationGateway;
+import io.github.railgun19457.velocityauth.verify.SocialVerificationGateway;
 import io.github.railgun19457.velocityauth.verify.VerificationService;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -50,11 +49,12 @@ class RecoveryServiceTest {
         storage = StorageService.open(new VelocityAuthConfig.Database(
                 VelocityAuthConfig.Database.Type.SQLITE,
                 new VelocityAuthConfig.Sqlite("recover.db"),
-                new VelocityAuthConfig.Mysql("127.0.0.1", 3306, "x", "root", "")), tempDir, NOPLogger.NOP_LOGGER);
+                new VelocityAuthConfig.Mysql("127.0.0.1", 3306, "x", "root", ""), 90, 90, 90), tempDir, NOPLogger.NOP_LOGGER);
         VelocityAuthConfig config = VelocityAuthConfig.from(ConfigNode.root(Map.of(
                 "verification", Map.of("ttl-seconds", 60, "max-attempts", 3,
                         "rate-limit", Map.of("per-ip-per-minute", 100, "per-account-per-minute", 100)),
-                "qqbot", Map.of("enabled", true, "group-id", "123456"))));
+                "binding", Map.of("social", Map.of("qq", Map.of("enabled", true))),
+                "bot", Map.of("enabled", true))));
         LangService lang = LangService.load("zh_cn", VelocityAuthPlugin.class, null, NOPLogger.NOP_LOGGER);
         PluginLogger log = new PluginLogger(NOPLogger.NOP_LOGGER);
         async = new AsyncExecutor();
@@ -71,28 +71,28 @@ class RecoveryServiceTest {
                 return CompletableFuture.completedFuture(true);
             }
         };
-        QqVerificationGateway gateway = new QqVerificationGateway() {
+        SocialVerificationGateway gateway = new SocialVerificationGateway() {
             @Override
-            public boolean available() {
+            public boolean available(String providerId) {
                 return true;
             }
 
             @Override
-            public void watch(String code, String groupId, int ttlSeconds) {
+            public void watch(String providerId, String code, int ttlSeconds) {
             }
 
             @Override
-            public void cancel(String code) {
+            public void cancel(String providerId, String code) {
             }
         };
         verifications = new VerificationService(() -> config, () -> lang, () -> "Test", mail,
                 new EmailTemplateService(tempDir, VelocityAuthPlugin.class, NOPLogger.NOP_LOGGER), gateway,
                 new RateLimiter(), (task, delay) -> scheduled.add(task), Runnable::run, log);
-        recovery = new RecoveryService(() -> config, storage, verifications, async, log);
+        recovery = new RecoveryService(storage, verifications, async);
 
         accountId = storage.accounts().insert("Alice", "alice", UUID.randomUUID(), "h",
                 AccountStatus.ACTIVE, null, 1L);
-        storage.bindings().insert(accountId, BindingType.EMAIL, "alice@qq.com", 1L, 1L);
+        storage.bindings().insert(accountId, "email", "alice@qq.com", 1L, 1L);
     }
 
     @AfterEach
@@ -103,7 +103,7 @@ class RecoveryServiceTest {
 
     @Test
     void unknownAccountIsSilentlyIgnored() {
-        RecoveryService.Start start = recovery.request("nobody", BindingType.EMAIL, UUID.randomUUID(),
+        RecoveryService.Start start = recovery.request("nobody", "email", UUID.randomUUID(),
                 "conn", "1.2.3.4", dispatch -> {
                 }).join();
         assertFalse(start.accepted());
@@ -112,7 +112,7 @@ class RecoveryServiceTest {
 
     @Test
     void accountWithoutRequestedBindingIsSilentlyIgnored() {
-        RecoveryService.Start start = recovery.request("alice", BindingType.QQ, UUID.randomUUID(),
+        RecoveryService.Start start = recovery.request("alice", "qq", UUID.randomUUID(),
                 "conn", "1.2.3.4", dispatch -> {
                 }).join();
         assertFalse(start.accepted());
@@ -121,7 +121,7 @@ class RecoveryServiceTest {
     @Test
     void emailRecoveryGrantsResetAfterVerification() {
         UUID playerUuid = UUID.randomUUID();
-        RecoveryService.Start start = recovery.request("alice", BindingType.EMAIL, playerUuid,
+        RecoveryService.Start start = recovery.request("alice", "email", playerUuid,
                 "conn", "1.2.3.4", dispatch -> {
                 }).join();
         assertTrue(start.accepted());
@@ -139,14 +139,14 @@ class RecoveryServiceTest {
 
     @Test
     void qqRecoveryGrantsAfterBotMatch() {
-        storage.bindings().insert(accountId, BindingType.QQ, "10001", 1L, 1L);
+        storage.bindings().insert(accountId, "qq", "10001", 1L, 1L);
         UUID playerUuid = UUID.randomUUID();
-        RecoveryService.Start start = recovery.request("alice", BindingType.QQ, playerUuid,
+        RecoveryService.Start start = recovery.request("alice", "qq", playerUuid,
                 "conn", "1.2.3.4", dispatch -> {
                 }).join();
         assertTrue(start.accepted());
 
-        assertTrue(verifications.onQqMatched(start.session().code(), "10001", "123456", true));
+        assertTrue(verifications.onSocialMatched("qq", start.session().code(), "10001", "123456", "tester"));
         assertTrue(start.completion().join().completed());
         assertEquals(accountId, recovery.consumeGrant(playerUuid).orElseThrow());
     }

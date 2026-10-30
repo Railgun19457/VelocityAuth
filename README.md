@@ -10,22 +10,25 @@
 - 账号 UUID 用**离线模式原生算法**（`offline(账号名)`，大小写敏感），未装认证插件时期的历史数据（权限组、经济、领地、背包……）无缝接上
 - 支持**任意游戏 ID 登录同一账号**（用 `test2` 登录 `test1`，全服表现为 `test1`）
 - Java 端与基岩端（Geyser + Floodgate）**共用同一账号**
-- **注册后必须绑定**（可配）：`email` / `qq` 可同时开启，玩家任选其一；未绑定不能登录，超时未绑定自动清除
-- 邮箱 / QQ 绑定用于**找回密码**；邮箱域名可白/黑名单限制
+- **注册后必须绑定**（可配）：`email` 与任意社交渠道（默认 `qq`，可加 `discord` 等）可同时开启，玩家任选其一；未绑定不能登录，超时未绑定自动清除
+- 邮箱 / 社交账号绑定用于**找回密码**；邮箱域名可白/黑名单限制
+- **渠道无关的绑定框架**：`email` 走内置 SMTP，社交平台（QQ / Discord / …）由 bot 适配器实现，插件只保留**平台无关**的接受规则
+- **绑定历史**：解绑 / 注销后仍保留渠道标识的绑定记录（可追溯曾绑定过哪些账号），并支持**再绑定冷却**（防同一邮箱/账号反复换号）
 - **注销账号** `/deleteaccount`（需登录 + 二次验证）
 - 验证码统一走一次性会话（TTL、限次、限流），邮件与提示带**操作名称**区分场景
 - 未认证隔离：路由到登录服 + 拦截命令 + 兜底拦跳服；命令的**补全与可见性**按登录状态与权限过滤
 - 记忆上次所在子服；可选会话保持（同 IP 免密，默认关闭）
 - 正版分支：默认仍需 `/login`，可配置保留真实 Mojang UUID
 - 完整管理命令（状态、账号管理、踢会话、顶号、审计日志）
-- MiniMessage 文案（中英双语）+ 点击事件：`[登录]`/`[注册]`/`[忘记密码]` 一键填充、QQ 验证码点击复制
+- MiniMessage 文案（中英双语）+ 点击事件：`[登录]`/`[注册]`/`[忘记密码]` 一键填充、社交验证码点击复制
 - SQLite（默认）/ MySQL
-- 与 QQ bot 的安全 WebSocket 通道（Ed25519 + X25519/AES-256-GCM，见 [`docs/PROTOCOL.md`](docs/PROTOCOL.md)）
+- 与社交平台 bot 的安全 WebSocket 通道（Ed25519 + X25519/AES-256-GCM，见 [`docs/PROTOCOL.md`](docs/PROTOCOL.md)）
+- bot 通道内置**玩家信息查询接口**（`query.v1`，默认关闭）：按账号查详情、按渠道标识/IP 反查账号、查登录历史（成功/失败/登出）、查渠道绑定历史（含解绑/注销）、查聚合统计（注册数/各渠道绑定数/在线等）；权限校验由 bot 侧负责
 
 ## 运行环境
 
 - Java 21+，Velocity 3.5.1
-- 可选：Geyser + Floodgate（基岩端）、SMTP 服务、QQ bot
+- 可选：Geyser + Floodgate（基岩端）、SMTP 服务、社交平台 bot
 
 ## 安装
 
@@ -52,28 +55,28 @@ accepts-transfers = true
 | `/login <账号> <密码>` | 登录 | 未认证 |
 | `/logout` | 退出登录 | 已认证 |
 | `/changepassword <旧密码> <新密码>` | 修改密码 | 已认证 |
-| `/bind <email\|qq> [值]` | 绑定邮箱或 QQ | 已认证，或待绑定 / 密码已通过的未认证连接 |
-| `/unbind <email\|qq>` | 解绑（需先验证一次） | 已认证 |
+| `/bind <渠道> [值]` | 绑定邮箱（`email`，需地址）或社交渠道（如 `qq`，群内发码） | 已认证，或待绑定 / 密码已通过的未认证连接 |
+| `/unbind <渠道>` | 解绑（需先验证一次） | 已认证 |
 | `/deleteaccount` | 注销账号（需二次验证） | 已认证 |
 | `/verify <验证码>` / `/verify cancel` | 输入邮箱验证码 / 取消 | — |
-| `/forgot <账号> [email\|qq]` | 找回密码 | 未认证 |
+| `/forgot <账号> [渠道]` | 找回密码 | 未认证 |
 | `/resetpassword <新密码> <确认密码>` | 验证通过后重置密码 | — |
 
-`email` / `qq` 参数支持 Tab 补全。命令的补全与可见性按状态与权限过滤（未认证时只看到登录相关命令，`/vauth` 只对有权限的账号可见）。
+渠道参数（`email` / 各社交渠道）支持 Tab 补全。命令的补全与可见性按状态与权限过滤（未认证时只看到登录相关命令，`/vauth` 只对有权限的账号可见）。
 
 ### 注册与绑定
 
 `/register` 固定三个参数。是否必须绑定由 `registration.require-binding` 决定：
 
 - **空列表**：注册完直接可用并自动登录。
-- **配置了 `email` / `qq`**：账号先落为「待绑定」，玩家任选其一完成绑定后才激活并自动登录；超过 `unbound-ttl-minutes` 未绑定会被自动清除、账号名释放。
+- **配置了 `email` / 社交渠道**：账号先落为「待绑定」，玩家任选其一完成绑定后才激活并自动登录；超过 `unbound-ttl-minutes` 未绑定会被自动清除、账号名释放。
 
 未绑定的账号**不能登录**（`/login` 会提示先绑定）。判断以「是否已绑定」为准，所以配置从无到有后，**历史遗留的未绑定账号也会被拦在登录外**，需要先 `/bind`。
 
 ### 找回密码
 
 1. `/forgot <账号>` → 列出可选渠道
-2. `/forgot <账号> <email\|qq>` → 向**已绑定**的渠道发码
+2. `/forgot <账号> <渠道>` → 向**已绑定**的渠道发码
 3. `/resetpassword <新密码> <确认密码>` → 验证通过后 5 分钟内可用，成功后自动登录
 
 前提是账号有绑定；没绑定的账号收不到码。重置成功同样要满足 `require-binding`。
@@ -88,7 +91,7 @@ accepts-transfers = true
 | `reload` | 重载配置、语言文件与邮件模板 |
 | `account <账号> info` | 账号详情 |
 | `account <账号> setpassword <密码>` | 强制改密 |
-| `account <账号> unbind <email\|qq>` | 强制解绑 |
+| `account <账号> unbind <渠道>` | 强制解绑 |
 | `account <账号> lock\|unlock` | 锁定 / 解锁（锁定会踢出在线会话） |
 | `account <账号> delete` | 删除账号（级联删除身份与绑定） |
 | `sessions list` | 列出在线已认证会话 |
@@ -113,14 +116,14 @@ accepts-transfers = true
 主要分区（完整默认值与注释见 [`config.example.yml`](config.example.yml)）：
 
 - `language`：`zh_cn` / `en_us`
-- `database`：`sqlite`（默认）或 `mysql`
+- `database`：`sqlite`（默认）或 `mysql`；`login-history-days` / `audit-log-days` / `binding-history-days` 三张历史表的保留天数（0=永久）
 - `servers`：`login` 登录服、`default` 认证后默认服、`allowed` 允许进入的子服、`remember-last`
 - `auth`：账号名 / 密码规则、`bcrypt-cost`、会话保持 `session`、正版 `premium`、基岩 `bedrock`
 - `registration`：`require-binding`（注册后必须绑定的渠道）、`unbound-ttl-minutes`
-- `binding`：邮箱基数与域名白/黑名单、QQ 基数
+- `binding`：`email`（基数、域名白/黑名单、冷却）+ `social`（任意社交渠道，各自基数/冷却/码长）；`cooldown-minutes` 解绑/注销后的再绑定冷却
 - `verification`：码长、有效期、尝试次数、限流
 - `smtp`：内置 SMTP（QQ 邮箱填**授权码**）
-- `qqbot`：bot 监听、群号、私聊号、配对
+- `bot`：bot 通道（平台无关）：监听、配对、`query`（玩家信息查询接口，默认关闭）。各渠道的监听位置/成员校验由 bot 侧负责
 - `proxy` / `security`：对外地址、bot 握手参数
 
 **邮件模板**在 `plugins/velocityauth/email.yml`：`html`（精美卡片正文）+ `text`（纯文本兜底），占位符 `{action}`（操作名称）`{code}` `{minutes}` `{server}`。
@@ -130,11 +133,11 @@ accepts-transfers = true
 ## 注意事项
 
 - 登录成功后会有一次重连；1.20.5 以下客户端会断开并提示重新连接（建议显式配置 `proxy.address`）
-- QQ 渠道的验证码**只能在群里发**：游戏内 `/verify` 对 QQ 会话无效，否则公开群里的码可被任何人用来冒用
+- 社交渠道的验证码**只能在对应房间发**：游戏内 `/verify` 对社交会话无效，否则公开房间里的码可被任何人用来冒用
 - 邮箱域名按 `@` 之后**精确匹配**（不做子域名后缀匹配，避免 `mail.qq.com` 绕过白名单）
 - 会话保持默认关闭：国内 NAT 共享 IP 普遍，同 IP 免密有被他人利用的风险
 - 正版名冲突默认先来先得：名称一旦被注册，其他人（含正版玩家）无法再用
-- `/vauth reload` 不重建 bot 通道：改动 `qqbot.*` 需重启代理
+- `/vauth reload` 不重建 bot 通道：改动 `bot.*` 需重启代理
 - 释放出来的 `config.yml` / `lang/*.yml` / `email.yml` 带 `# version: N` 标记。升级时：语言文件与邮件模板会在**备份原文件后**自动升级；`config.yml` 因含凭据**不会自动覆盖**，只会写出 `config.yml.new` 供比对。你改过但没有版本标记的文件也只会得到 `.new`
 - **不要提交**：`config.yml`（含 SMTP 授权码、数据库密码）、`keys/`（私钥）、`*.db`（玩家数据）
 

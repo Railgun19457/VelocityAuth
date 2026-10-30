@@ -1,12 +1,8 @@
 package io.github.railgun19457.velocityauth.auth;
 
-import io.github.railgun19457.velocityauth.config.VelocityAuthConfig;
 import io.github.railgun19457.velocityauth.storage.StorageService;
 import io.github.railgun19457.velocityauth.storage.model.Account;
-import io.github.railgun19457.velocityauth.storage.model.BindingType;
 import io.github.railgun19457.velocityauth.util.AsyncExecutor;
-import io.github.railgun19457.velocityauth.util.PluginLogger;
-import io.github.railgun19457.velocityauth.verify.VerificationChannel;
 import io.github.railgun19457.velocityauth.verify.VerificationPurpose;
 import io.github.railgun19457.velocityauth.verify.VerificationRequest;
 import io.github.railgun19457.velocityauth.verify.VerificationService;
@@ -20,7 +16,6 @@ import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Consumer;
-import java.util.function.Supplier;
 
 /**
  * 找回密码编排（DESIGN 6.3）。
@@ -33,11 +28,9 @@ public final class RecoveryService {
     /** 重置授权有效期。 */
     public static final Duration GRANT_TTL = Duration.ofMinutes(5);
 
-    private final Supplier<VelocityAuthConfig> config;
     private final StorageService storage;
     private final VerificationService verifications;
     private final AsyncExecutor async;
-    private final PluginLogger log;
 
     private final Map<UUID, Grant> grants = new ConcurrentHashMap<>();
 
@@ -52,16 +45,13 @@ public final class RecoveryService {
                         CompletableFuture<io.github.railgun19457.velocityauth.verify.VerificationResult> completion) {
     }
 
-    public RecoveryService(Supplier<VelocityAuthConfig> config, StorageService storage,
-                           VerificationService verifications, AsyncExecutor async, PluginLogger log) {
-        this.config = config;
+    public RecoveryService(StorageService storage, VerificationService verifications, AsyncExecutor async) {
         this.storage = storage;
         this.verifications = verifications;
         this.async = async;
-        this.log = log;
     }
 
-    public CompletableFuture<Start> request(String accountName, BindingType channel, UUID playerUuid,
+    public CompletableFuture<Start> request(String accountName, String providerId, UUID playerUuid,
                                             String connectionName, String ip,
                                             Consumer<io.github.railgun19457.velocityauth.verify.VerificationDispatch>
                                                     onDispatch) {
@@ -77,20 +67,18 @@ public final class RecoveryService {
                 return new Start(false, null, null, null);
             }
             Optional<io.github.railgun19457.velocityauth.storage.model.Binding> binding =
-                    storage.bindings().find(account.id(), channel);
+                    storage.bindings().find(account.id(), providerId);
             if (binding.isEmpty()) {
                 return new Start(false, null, null, null);
             }
             String target = binding.get().identifier();
 
-            VerificationChannel verificationChannel = channel == BindingType.EMAIL
-                    ? VerificationChannel.EMAIL : VerificationChannel.QQ;
             VerificationRequest request = VerificationRequest
-                    .builder(VerificationPurpose.RECOVER, verificationChannel, playerUuid)
+                    .builder(VerificationPurpose.RECOVER, providerId, playerUuid)
                     .accountName(nameLower)
                     .connectionName(connectionName)
                     .ip(ip)
-                    .target(verificationChannel == VerificationChannel.EMAIL ? target : null)
+                    .target(Provider.EMAIL_ID.equals(providerId) ? target : null)
                     .data(Map.of("account_id", Long.toString(account.id())))
                     .onDispatch(onDispatch)
                     .build();

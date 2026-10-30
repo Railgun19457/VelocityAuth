@@ -1,5 +1,7 @@
 package io.github.railgun19457.velocityauth.storage.model;
 
+import java.util.Locale;
+
 /** 身份类型。 */
 public enum IdentityKind {
     /** Java 版：连接名小写。 */
@@ -8,14 +10,14 @@ public enum IdentityKind {
     BEDROCK;
 
     public String dbValue() {
-        return name().toLowerCase();
+        return name().toLowerCase(Locale.ROOT);
     }
 
     public static IdentityKind fromDb(String value) {
         if (value == null) {
             return JAVA;
         }
-        return switch (value.toLowerCase()) {
+        return switch (value.toLowerCase(Locale.ROOT)) {
             case "bedrock" -> BEDROCK;
             default -> JAVA;
         };

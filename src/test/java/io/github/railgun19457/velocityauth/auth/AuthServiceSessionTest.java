@@ -57,14 +57,14 @@ class AuthServiceSessionTest {
         storage = StorageService.open(new VelocityAuthConfig.Database(
                 VelocityAuthConfig.Database.Type.SQLITE,
                 new VelocityAuthConfig.Sqlite("session.db"),
-                new VelocityAuthConfig.Mysql("127.0.0.1", 3306, "x", "root", "")), tempDir, NOPLogger.NOP_LOGGER);
+                new VelocityAuthConfig.Mysql("127.0.0.1", 3306, "x", "root", ""), 90, 90, 90), tempDir, NOPLogger.NOP_LOGGER);
         log = new PluginLogger(NOPLogger.NOP_LOGGER);
         async = new AsyncExecutor();
         cache = new AccountCache(storage.accounts(), storage.identities(), log);
         cache.load();
 
         accountId = storage.createAccount("alice", "alice", UUID.randomUUID(), "h",
-                AccountStatus.ACTIVE, null, 1L, IdentityKind.JAVA, "alice", null, null);
+                AccountStatus.ACTIVE, null, 1L, IdentityKind.JAVA, "alice", java.util.Map.of());
         Account account = storage.accounts().findById(accountId).orElseThrow();
         cache.put(account);
         cache.indexIdentity(IdentityKind.JAVA, "alice", accountId);
@@ -138,5 +138,18 @@ class AuthServiceSessionTest {
         Thread.sleep(500);
         assertTrue(auth.resolveSessionLogin(identity, "1.2.3.4").isEmpty(),
                 "会话保持关闭时不应记录");
+    }
+
+    @Test
+    void deleteAccountRecordsBindingRelease() throws Exception {
+        AuthService auth = service(true);
+        storage.bindings().insert(accountId, "email", "alice@qq.com", 1L, 1L);
+
+        assertTrue(auth.deleteAccount(accountId, "1.2.3.4", "test").join());
+
+        var history = storage.bindingHistory().findByIdentifier("email", "alice@qq.com", 10);
+        assertEquals(1, history.size(), "注销前应把绑定记为释放");
+        assertEquals("delete", history.get(0).action());
+        assertTrue(storage.accounts().findById(accountId).isEmpty());
     }
 }

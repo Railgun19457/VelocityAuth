@@ -1,6 +1,10 @@
-// 参考 bot：配对 + 会话认证 + 处理 verify.watch / 回复 verify.matched
+// 参考 bot：配对 + 会话认证 + 处理 verify.watch / 回复 verify.matched / 发送 query.*
 //
-// 用法：node bot-client.mjs --pairing <pairing.json> [--watch <code>] [--ttl 300]
+// 用法：
+//   node bot-client.mjs --pairing <pairing.json> [--watch <code>] [--ttl 300]
+//   node bot-client.mjs --pairing <pairing.json> --query <type>:<by>:<value>
+//     <type> ∈ account | lookup | history | binding-history | stats
+//     例：--query lookup:qq:10001    --query account:name:Alice    --query stats
 // pairing.json: { "host": "127.0.0.1", "port": 8765, "pairing_id": "...", "code": "..." }
 import fs from 'node:fs'
 import crypto from 'node:crypto'
@@ -24,6 +28,8 @@ import {
 const CAPABILITIES = ['verify.v1']
 const CLIENT_ID = process.env.VA_BOT_CLIENT_ID || 'node-bot-1'
 const CLIENT_KEY_ID = 'bot-k1'
+const PROVIDER = process.env.VA_BOT_PROVIDER || 'qq'
+const SCOPES = process.env.VA_BOT_SCOPES || ''
 const STATE_FILE = process.env.VA_BOT_STATE || fileURLToPath(new URL('./.bot-state.json', import.meta.url))
 
 function parseArgs() {
@@ -66,6 +72,7 @@ class ReferenceBot {
     this.sessionId = null
     this.outboundSeq = 0
     this.inboundLastSeq = -1
+    this.pendingQueries = new Map()
     this.handlers = { onReady: () => {}, onWatch: () => {}, onAck: () => {} }
   }
 
@@ -114,6 +121,25 @@ class ReferenceBot {
     const seq = this.outboundSeq++
     const ct = seal(this.keys.keyC2s, 0, seq, plaintext)
     this.send({ v: 1, kind: 'sealed', seq, ct: b64u(ct) })
+    return id
+  }
+
+  /**
+   * 发送一条 query.* 请求并等待结果（按响应里的 request_id 关联）。
+   * 例：await bot.sendQuery('query.lookup', { by: 'qq', value: '10001' })
+   * 结果里的值都是字符串（见 PROTOCOL.md 8.1）。
+   */
+  sendQuery(type, payload = {}, timeoutMs = 10000) {
+    const requestId = this.sendSealed(type, payload)
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => {
+        if (this.pendingQueries.delete(requestId)) reject(new Error(`查询超时：${type}`))
+      }, timeoutMs)
+      this.pendingQueries.set(requestId, {
+        resolve: (result) => { clearTimeout(timer); resolve(result) },
+        reject: (error) => { clearTimeout(timer); reject(error) },
+      })
+    })
   }
 
   verifyServerFrame(frame, pairContext) {
@@ -134,6 +160,8 @@ class ReferenceBot {
         client_id: CLIENT_ID,
         client_key_id: CLIENT_KEY_ID,
         client_public_key: b64u(this.ed.rawPublic),
+        provider: PROVIDER,
+        scopes: SCOPES,
         capabilities: CAPABILITIES,
       }
       const input = signatureInput('pair', 'pair.hello', this.helloId, ts, this.helloNonce, payload,
@@ -155,6 +183,8 @@ class ReferenceBot {
       client_public_key_sha256: b64u(crypto.createHash('sha256').update(this.ed.rawPublic).digest()),
       client_ephemeral_key: b64u(this.eph.rawPublic),
       client_nonce: b64u(this.clientNonce),
+      provider: PROVIDER,
+      scopes: SCOPES,
       capabilities: CAPABILITIES,
     }, false, this.helloId)
   }
@@ -253,13 +283,13 @@ class ReferenceBot {
       case 'verify.watch': {
         const code = message.payload.code
         this.log(`收到 verify.watch code=${code}`)
-        this.handlers.onWatch(code, message.payload.group_id)
+        this.handlers.onWatch(code, message.payload.provider)
+        // 真实实现：在群里观测到该码、且已按平台策略（成员/角色等）判定有效后，再回报
         this.sendSealed('verify.matched', {
           code,
-          qq: process.env.VA_BOT_QQ || '10001',
-          group_id: message.payload.group_id,
-          group_nick: '参考bot',
-          is_group_member: true,
+          subject: process.env.VA_BOT_SUBJECT || '10001',
+          scope: process.env.VA_BOT_SCOPES || '',
+          display_name: '参考bot',
           matched_at: Math.floor(Date.now() / 1000),
         })
         break
@@ -271,10 +301,31 @@ class ReferenceBot {
       case 'verify.cancel':
         this.log(`收到 verify.cancel code=${message.payload.code}`)
         break
+      case 'error': {
+        const requestId = message.payload.request_id
+        const pending = requestId ? this.pendingQueries.get(requestId) : null
+        if (pending) {
+          this.pendingQueries.delete(requestId)
+          pending.reject(new Error(`查询错误 ${message.payload.code}: ${message.payload.message}`))
+        } else {
+          this.log(`服务端错误 ${message.payload.code}: ${message.payload.message}`)
+        }
+        break
+      }
       case 'pong':
         break
-      default:
+      default: {
+        if (message.type.endsWith('.result')) {
+          const requestId = message.payload.request_id
+          const pending = requestId ? this.pendingQueries.get(requestId) : null
+          if (pending) {
+            this.pendingQueries.delete(requestId)
+            pending.resolve(message.payload)
+            break
+          }
+        }
         this.log(`忽略密封帧 ${message.type}`)
+      }
     }
   }
 
@@ -292,8 +343,18 @@ const args = parseArgs()
 if (args.pairing) {
   const config = JSON.parse(fs.readFileSync(args.pairing, 'utf8'))
   const bot = new ReferenceBot(config, {})
-  bot.handlers.onReady = () => {
+  bot.handlers.onReady = async () => {
     if (args.watch) bot.sendSealed('verify.watch.ack', { code: args.watch, accepted: true })
+    if (args.query) {
+      const [type, by, value] = args.query.split(':')
+      try {
+        const result = await bot.sendQuery(`query.${type}`, { by, value })
+        console.log(`[bot] query.${type} 结果：\n${JSON.stringify(result, null, 2)}`)
+      } catch (e) {
+        console.error(`[bot] 查询失败：${e.message}`)
+      }
+      bot.close()
+    }
   }
   bot.connect().catch((e) => {
     console.error(`[bot] 失败：${e.message}`)

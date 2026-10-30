@@ -31,7 +31,6 @@ public final class EmailTemplateService {
     private static final String DEFAULT_HTML = "<p>你的验证码是：<b>{code}</b></p>"
             + "<p>{minutes} 分钟内有效，请勿泄露给他人。</p>";
 
-    private final Path dataDirectory;
     private final Path file;
     private final Class<?> resourceAnchor;
     private final Logger logger;
@@ -41,7 +40,7 @@ public final class EmailTemplateService {
     private volatile String html = DEFAULT_HTML;
 
     public EmailTemplateService(Path dataDirectory, Class<?> resourceAnchor, Logger logger) {
-        this.dataDirectory = Objects.requireNonNull(dataDirectory, "dataDirectory");
+        Objects.requireNonNull(dataDirectory, "dataDirectory");
         this.file = dataDirectory.resolve("email.yml");
         this.resourceAnchor = Objects.requireNonNull(resourceAnchor, "resourceAnchor");
         this.logger = Objects.requireNonNull(logger, "logger");

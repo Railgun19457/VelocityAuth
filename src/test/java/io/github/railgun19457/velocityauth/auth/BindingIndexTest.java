@@ -3,7 +3,6 @@ package io.github.railgun19457.velocityauth.auth;
 import io.github.railgun19457.velocityauth.config.VelocityAuthConfig;
 import io.github.railgun19457.velocityauth.storage.StorageService;
 import io.github.railgun19457.velocityauth.storage.model.AccountStatus;
-import io.github.railgun19457.velocityauth.storage.model.BindingType;
 import io.github.railgun19457.velocityauth.util.PluginLogger;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -37,7 +36,7 @@ class BindingIndexTest {
         storage = StorageService.open(new VelocityAuthConfig.Database(
                 VelocityAuthConfig.Database.Type.SQLITE,
                 new VelocityAuthConfig.Sqlite("binding-index.db"),
-                new VelocityAuthConfig.Mysql("127.0.0.1", 3306, "x", "root", "")), tempDir, NOPLogger.NOP_LOGGER);
+                new VelocityAuthConfig.Mysql("127.0.0.1", 3306, "x", "root", ""), 90, 90, 90), tempDir, NOPLogger.NOP_LOGGER);
         index = new BindingIndex(storage.bindings(), new PluginLogger(NOPLogger.NOP_LOGGER));
     }
 
@@ -58,54 +57,54 @@ class BindingIndexTest {
         long emailOnly = account("EmailOnly");
         long qqOnly = account("QqOnly");
         long both = account("Both");
-        storage.bindings().insert(emailOnly, BindingType.EMAIL, "a@qq.com", 1L, 1L);
-        storage.bindings().insert(qqOnly, BindingType.QQ, "10001", 1L, 1L);
-        storage.bindings().insert(both, BindingType.EMAIL, "b@qq.com", 1L, 1L);
-        storage.bindings().insert(both, BindingType.QQ, "10002", 1L, 1L);
+        storage.bindings().insert(emailOnly, "email", "a@qq.com", 1L, 1L);
+        storage.bindings().insert(qqOnly, "qq", "10001", 1L, 1L);
+        storage.bindings().insert(both, "email", "b@qq.com", 1L, 1L);
+        storage.bindings().insert(both, "qq", "10002", 1L, 1L);
 
         index.load();
 
         assertEquals(3, index.size());
-        assertTrue(index.satisfies(emailOnly, List.of(BindingType.EMAIL)));
-        assertFalse(index.satisfies(emailOnly, List.of(BindingType.QQ)));
-        assertTrue(index.satisfies(both, List.of(BindingType.EMAIL, BindingType.QQ)));
+        assertTrue(index.satisfies(emailOnly, List.of("email")));
+        assertFalse(index.satisfies(emailOnly, List.of("qq")));
+        assertTrue(index.satisfies(both, List.of("email", "qq")));
         // 空要求 = 无需绑定
         assertTrue(index.satisfies(emailOnly, List.of()));
         // 完全没有绑定的账号
-        assertFalse(index.satisfies(account("NoBinding"), List.of(BindingType.EMAIL)));
+        assertFalse(index.satisfies(account("NoBinding"), List.of("email")));
     }
 
     @Test
     void putAndRemoveKeepMaskInSync() {
         long id = account("Sync");
-        assertFalse(index.satisfies(id, List.of(BindingType.EMAIL, BindingType.QQ)));
+        assertFalse(index.satisfies(id, List.of("email", "qq")));
 
-        index.put(id, BindingType.EMAIL);
-        assertTrue(index.satisfies(id, List.of(BindingType.EMAIL)));
-        assertFalse(index.satisfies(id, List.of(BindingType.QQ)));
+        index.put(id, "email");
+        assertTrue(index.satisfies(id, List.of("email")));
+        assertFalse(index.satisfies(id, List.of("qq")));
 
-        index.put(id, BindingType.QQ);
-        assertTrue(index.satisfies(id, List.of(BindingType.QQ)));
+        index.put(id, "qq");
+        assertTrue(index.satisfies(id, List.of("qq")));
 
         // 解绑一个，另一个仍在 → 仍满足「任选其一」
-        index.remove(id, BindingType.EMAIL);
-        assertFalse(index.satisfies(id, List.of(BindingType.EMAIL)));
-        assertTrue(index.satisfies(id, List.of(BindingType.QQ)));
+        index.remove(id, "email");
+        assertFalse(index.satisfies(id, List.of("email")));
+        assertTrue(index.satisfies(id, List.of("qq")));
 
         // 解绑最后一个 → 该账号从索引中消失
-        index.remove(id, BindingType.QQ);
+        index.remove(id, "qq");
         assertEquals(0, index.size());
-        assertFalse(index.satisfies(id, List.of(BindingType.EMAIL, BindingType.QQ)));
+        assertFalse(index.satisfies(id, List.of("email", "qq")));
     }
 
     @Test
     void removeAccountDropsEverything() {
         long id = account("Gone");
-        index.put(id, BindingType.EMAIL);
-        index.put(id, BindingType.QQ);
+        index.put(id, "email");
+        index.put(id, "qq");
         index.removeAccount(id);
         assertEquals(0, index.size());
-        assertFalse(index.satisfies(id, List.of(BindingType.EMAIL)));
+        assertFalse(index.satisfies(id, List.of("email")));
     }
 
     /**
@@ -116,16 +115,16 @@ class BindingIndexTest {
     @Test
     void unbindGuardSemantics() {
         long onlyEmail = account("OnlyEmail");
-        index.put(onlyEmail, BindingType.EMAIL);
+        index.put(onlyEmail, "email");
         // 要求 [email, qq]：去掉 email 后没有任何渠道 → 不允许解绑
-        assertFalse(index.satisfies(onlyEmail, List.of(BindingType.QQ)));
+        assertFalse(index.satisfies(onlyEmail, List.of("qq")));
         // 要求 [email]：去掉 email 后要求为空 → 视为满足（配置里 email 是唯一要求，解绑即等于关闭要求）
         assertTrue(index.satisfies(onlyEmail, List.of()));
 
         long both = account("BothTwo");
-        index.put(both, BindingType.EMAIL);
-        index.put(both, BindingType.QQ);
+        index.put(both, "email");
+        index.put(both, "qq");
         // 要求 [email, qq]：去掉 email 后还有 qq → 允许解绑
-        assertTrue(index.satisfies(both, List.of(BindingType.QQ)));
+        assertTrue(index.satisfies(both, List.of("qq")));
     }
 }

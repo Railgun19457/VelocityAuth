@@ -45,12 +45,12 @@ class VerificationServiceTest {
         async = new AsyncExecutor();
         VelocityAuthConfig config = VelocityAuthConfig.from(ConfigNode.root(Map.of(
                 "verification", Map.of(
-                        "email-code-length", 6,
-                        "qq-code-length", 6,
+                        "code-length", 6,
                         "ttl-seconds", 60,
                         "max-attempts", 3,
                         "rate-limit", Map.of("per-ip-per-minute", 100, "per-account-per-minute", 100)),
-                "qqbot", Map.of("enabled", true, "group-id", "123456", "require-group-member", true))));
+                "binding", Map.of("social", Map.of("qq", Map.of("enabled", true))),
+                "bot", Map.of("enabled", true))));
         LangService lang = LangService.load("zh_cn", VelocityAuthPlugin.class, null, NOPLogger.NOP_LOGGER);
         PluginLogger log = new PluginLogger(NOPLogger.NOP_LOGGER);
 
@@ -67,19 +67,19 @@ class VerificationServiceTest {
             }
         };
 
-        QqVerificationGateway gateway = new QqVerificationGateway() {
+        SocialVerificationGateway gateway = new SocialVerificationGateway() {
             @Override
-            public boolean available() {
-                return true;
+            public boolean available(String providerId) {
+                return "qq".equals(providerId);
             }
 
             @Override
-            public void watch(String code, String groupId, int ttlSeconds) {
+            public void watch(String providerId, String code, int ttlSeconds) {
                 watched.add(code);
             }
 
             @Override
-            public void cancel(String code) {
+            public void cancel(String providerId, String code) {
                 cancelled.add(code);
             }
         };
@@ -94,30 +94,30 @@ class VerificationServiceTest {
         async.close();
     }
 
-    private VerificationService.Start start(VerificationChannel channel, VerificationPurpose purpose) {
-        return start(channel, purpose, UUID.randomUUID());
+    private VerificationService.Start start(String provider, VerificationPurpose purpose) {
+        return start(provider, purpose, UUID.randomUUID());
     }
 
-    private VerificationService.Start start(VerificationChannel channel, VerificationPurpose purpose, UUID playerUuid) {
+    private VerificationService.Start start(String provider, VerificationPurpose purpose, UUID playerUuid) {
         return service.start(VerificationRequest
-                .builder(purpose, channel, playerUuid)
+                .builder(purpose, provider, playerUuid)
                 .accountName("alice")
                 .connectionName("conn1")
                 .ip("1.2.3.4")
-                .target(channel == VerificationChannel.EMAIL ? "a@qq.com" : null)
+                .target("email".equals(provider) ? "a@qq.com" : null)
                 .data(Map.of("password_hash", "$2a$04$fake"))
                 .build());
     }
 
     @Test
-    void qqCodeIsWatchedAndCompletesOnMatch() {
-        VerificationService.Start start = start(VerificationChannel.QQ, VerificationPurpose.REGISTER);
+    void socialCodeIsWatchedAndCompletesOnMatch() {
+        VerificationService.Start start = start("qq", VerificationPurpose.REGISTER);
         assertTrue(start.accepted());
         VerificationSession session = start.session();
         assertTrue(session.code().startsWith("MC-"), session.code());
         assertTrue(watched.contains(session.code()));
 
-        assertTrue(service.onQqMatched(session.code(), "10001", "123456", true));
+        assertTrue(service.onSocialMatched("qq", session.code(), "10001", "123456", "tester"));
         assertTrue(start.completion().join().completed());
         assertEquals("10001", session.resolvedValue());
         assertTrue(cancelled.contains(session.code()), "完成后应通知 bot 停止监听");
@@ -125,25 +125,25 @@ class VerificationServiceTest {
     }
 
     @Test
-    void nonGroupMemberIsRejected() {
-        VerificationService.Start start = start(VerificationChannel.QQ, VerificationPurpose.BIND_QQ);
-        assertFalse(service.onQqMatched(start.session().code(), "10002", "123456", false));
+    void matchFromWrongProviderIsRejected() {
+        VerificationService.Start start = start("qq", VerificationPurpose.BIND_SOCIAL);
+        // 发起渠道为 qq；来自其它渠道的上报不得消费验证码
+        assertFalse(service.onSocialMatched("discord", start.session().code(), "10003", "room", "x"));
         assertFalse(start.completion().isDone());
-    }
-
-    @Test
-    void qqMatchFromWrongGroupIsRejected() {
-        VerificationService.Start start = start(VerificationChannel.QQ, VerificationPurpose.BIND_QQ);
-        // 配置群为 123456；来自其它群的命中不得消费验证码
-        assertFalse(service.onQqMatched(start.session().code(), "10003", "999999", true));
-        assertFalse(start.completion().isDone());
-        assertTrue(service.onQqMatched(start.session().code(), "10003", "123456", true));
+        assertTrue(service.onSocialMatched("qq", start.session().code(), "10003", "123456", "x"));
         assertTrue(start.completion().join().completed());
     }
 
     @Test
+    void matchWithoutSubjectIsRejected() {
+        VerificationService.Start start = start("qq", VerificationPurpose.BIND_SOCIAL);
+        assertFalse(service.onSocialMatched("qq", start.session().code(), "", "room", "x"));
+        assertFalse(start.completion().isDone());
+    }
+
+    @Test
     void emailCodeSubmitFlow() {
-        VerificationService.Start start = start(VerificationChannel.EMAIL, VerificationPurpose.BIND_EMAIL);
+        VerificationService.Start start = start("email", VerificationPurpose.BIND_EMAIL);
         assertTrue(start.accepted());
         assertEquals("a@qq.com", sentEmails.get(0));
         VerificationSession session = start.session();
@@ -158,7 +158,7 @@ class VerificationServiceTest {
 
     @Test
     void tooManyAttemptsVoidsSession() {
-        VerificationService.Start start = start(VerificationChannel.EMAIL, VerificationPurpose.RECOVER);
+        VerificationService.Start start = start("email", VerificationPurpose.RECOVER);
         UUID uuid = start.session().playerUuid();
         for (int i = 0; i < 3; i++) {
             assertEquals(VerificationService.SubmitOutcome.WRONG_CODE, service.submitCode(uuid, "111111"));
@@ -171,8 +171,8 @@ class VerificationServiceTest {
     @Test
     void newSessionReplacesPrevious() {
         UUID playerUuid = UUID.randomUUID();
-        VerificationService.Start first = start(VerificationChannel.QQ, VerificationPurpose.REGISTER, playerUuid);
-        VerificationService.Start second = start(VerificationChannel.QQ, VerificationPurpose.REGISTER, playerUuid);
+        VerificationService.Start first = start("qq", VerificationPurpose.REGISTER, playerUuid);
+        VerificationService.Start second = start("qq", VerificationPurpose.REGISTER, playerUuid);
         assertEquals(VerificationResult.Status.REPLACED, first.completion().join().status());
         assertFalse(second.completion().isDone());
         assertEquals(1, service.pendingCount());
@@ -180,14 +180,14 @@ class VerificationServiceTest {
 
     @Test
     void cancelCompletesWithCancelled() {
-        VerificationService.Start start = start(VerificationChannel.QQ, VerificationPurpose.BIND_QQ);
+        VerificationService.Start start = start("qq", VerificationPurpose.BIND_SOCIAL);
         service.cancel(start.session().playerUuid());
         assertEquals(VerificationResult.Status.CANCELLED, start.completion().join().status());
     }
 
     @Test
     void timeoutCompletesWithExpired() {
-        VerificationService.Start start = start(VerificationChannel.QQ, VerificationPurpose.REGISTER);
+        VerificationService.Start start = start("qq", VerificationPurpose.REGISTER);
         assertFalse(scheduledTasks.isEmpty(), "应注册超时任务");
         scheduledTasks.forEach(Runnable::run);
         assertEquals(VerificationResult.Status.EXPIRED, start.completion().join().status());
@@ -195,23 +195,23 @@ class VerificationServiceTest {
     }
 
     @Test
-    void inGameSubmissionCannotCompleteQqSession() {
-        VerificationService.Start start = start(VerificationChannel.QQ, VerificationPurpose.BIND_QQ);
+    void inGameSubmissionCannotCompleteSocialSession() {
+        VerificationService.Start start = start("qq", VerificationPurpose.BIND_SOCIAL);
         assertEquals(VerificationService.SubmitOutcome.WRONG_CHANNEL,
                 service.submitCode(start.session().playerUuid(), start.session().code()));
-        assertFalse(start.completion().isDone(), "QQ 渠道只能由群消息命中完成");
+        assertFalse(start.completion().isDone(), "社交渠道只能由 bot 命中完成");
         assertEquals(3, start.session().remainingAttempts(), "不应消耗尝试次数");
     }
 
     @Test
-    void dispatchCallbackReportsQqWatching() {
+    void dispatchCallbackReportsSocialWatching() {
         List<VerificationDispatch> dispatches = new ArrayList<>();
         VerificationService.Start start = service.start(VerificationRequest
-                .builder(VerificationPurpose.REGISTER, VerificationChannel.QQ, UUID.randomUUID())
+                .builder(VerificationPurpose.REGISTER, "qq", UUID.randomUUID())
                 .accountName("bob").connectionName("c").ip("1.2.3.4")
                 .onDispatch(dispatches::add)
                 .build());
         assertNotNull(start.session());
-        assertEquals(List.of(VerificationDispatch.QQ_WATCHING), dispatches);
+        assertEquals(List.of(VerificationDispatch.SOCIAL_WATCHING), dispatches);
     }
 }

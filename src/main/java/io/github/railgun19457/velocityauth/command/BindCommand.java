@@ -7,20 +7,21 @@ import io.github.railgun19457.velocityauth.auth.AuthSession;
 import io.github.railgun19457.velocityauth.auth.AuthSessionRegistry;
 import io.github.railgun19457.velocityauth.auth.EmailRules;
 import io.github.railgun19457.velocityauth.auth.IdentityResolver;
+import io.github.railgun19457.velocityauth.auth.Provider;
 import io.github.railgun19457.velocityauth.storage.model.Account;
-import io.github.railgun19457.velocityauth.storage.model.BindingType;
-import io.github.railgun19457.velocityauth.verify.VerificationChannel;
 import io.github.railgun19457.velocityauth.verify.VerificationPurpose;
 import io.github.railgun19457.velocityauth.verify.VerificationRequest;
 import io.github.railgun19457.velocityauth.verify.VerificationResult;
 import io.github.railgun19457.velocityauth.verify.VerificationService;
 
+import java.util.Locale;
 import java.util.Map;
+import java.util.Optional;
 
 /**
- * {@code /bind email <邮箱>} / {@code /bind qq}
+ * {@code /bind <渠道> [值]} —— 先通过一次验证会话证明持有渠道，再写入绑定（DESIGN 6.1 / 6.2）。
  * <p>
- * 先通过一次验证会话证明身份/持有渠道，再写入绑定（DESIGN 6.1 / 6.2）。
+ * {@code email} 需要地址参数；社交渠道由 bot 回报命中（无需游戏内输入）。
  */
 public final class BindCommand extends PlayerCommandSupport {
 
@@ -46,15 +47,16 @@ public final class BindCommand extends PlayerCommandSupport {
             player.sendMessage(plugin.lang().msg("command.bind.usage"));
             return;
         }
-        BindingType type = BindingType.fromName(args[0]);
-        if (type == null) {
+        String providerId = args[0].toLowerCase(Locale.ROOT);
+        Optional<Provider> provider = Provider.find(plugin.config(), providerId);
+        if (provider.isEmpty()) {
             player.sendMessage(plugin.lang().msg("command.bind.usage"));
             return;
         }
-        if (type == BindingType.EMAIL) {
-            bindEmail(player, account, args);
+        if (provider.get().email()) {
+            bindEmail(player, account, provider.get(), args);
         } else {
-            bindQq(player, account);
+            bindSocial(player, account, provider.get());
         }
     }
 
@@ -81,13 +83,13 @@ public final class BindCommand extends PlayerCommandSupport {
         return account;
     }
 
-    private void bindEmail(Player player, Account account, String[] args) {
+    private void bindEmail(Player player, Account account, Provider provider, String[] args) {
         if (args.length < 2) {
             player.sendMessage(plugin.lang().msg("command.bind.email-usage"));
             player.sendMessage(VerificationPrompts.emailDomainHint(plugin));
             return;
         }
-        if (!plugin.config().binding().email().enabled()) {
+        if (!provider.enabled()) {
             player.sendMessage(plugin.lang().msg("generic.feature-disabled"));
             return;
         }
@@ -104,15 +106,19 @@ public final class BindCommand extends PlayerCommandSupport {
             player.sendMessage(VerificationPrompts.emailDomainHint(plugin));
             return;
         }
-        if (plugin.bindings().hasBinding(account.id(), BindingType.EMAIL)) {
+        if (plugin.bindings().hasBinding(account.id(), provider.id())) {
             player.sendMessage(plugin.lang().msg("command.bind.already-bound"));
+            return;
+        }
+        if (plugin.bindings().cooldownRemainingSeconds(provider.id(), email) > 0) {
+            player.sendMessage(plugin.lang().msg("command.bind.cooldown"));
             return;
         }
         // 玩家「选择绑定邮箱」后，先告知支持的邮箱类型，再发码
         player.sendMessage(VerificationPrompts.emailDomainHint(plugin));
         String ip = ipOf(player);
         VerificationService.Start start = plugin.verifications().start(VerificationRequest
-                .builder(VerificationPurpose.BIND_EMAIL, VerificationChannel.EMAIL, player.getUniqueId())
+                .builder(VerificationPurpose.BIND_EMAIL, provider.id(), player.getUniqueId())
                 .accountName(account.nameLower())
                 .connectionName(identityOf(player).identifier())
                 .ip(ip)
@@ -129,43 +135,43 @@ public final class BindCommand extends PlayerCommandSupport {
                 player.sendMessage(verificationFailureMessage(result.status()));
                 return;
             }
-            plugin.bindings().bindEmail(account, email, ip)
-                    .thenAccept(outcome -> afterBind(player, account, outcome));
+            plugin.bindings().bind(account, provider.id(), email, ip)
+                    .thenAccept(outcome -> afterBind(player, account, provider, outcome));
         });
     }
 
-    private void bindQq(Player player, Account account) {
-        if (!plugin.config().binding().qq().enabled()) {
+    private void bindSocial(Player player, Account account, Provider provider) {
+        if (!provider.enabled()) {
             player.sendMessage(plugin.lang().msg("generic.feature-disabled"));
             return;
         }
-        if (plugin.bindings().hasBinding(account.id(), BindingType.QQ)) {
+        if (plugin.bindings().hasBinding(account.id(), provider.id())) {
             player.sendMessage(plugin.lang().msg("command.bind.already-bound"));
             return;
         }
         String ip = ipOf(player);
         VerificationService.Start start = plugin.verifications().start(VerificationRequest
-                .builder(VerificationPurpose.BIND_QQ, VerificationChannel.QQ, player.getUniqueId())
+                .builder(VerificationPurpose.BIND_SOCIAL, provider.id(), player.getUniqueId())
                 .accountName(account.nameLower())
                 .connectionName(identityOf(player).identifier())
                 .ip(ip)
                 .data(Map.of("account_id", Long.toString(account.id())))
                 .onDispatch(VerificationPrompts.dispatchHandler(plugin, player, null,
-                        VerificationPurpose.BIND_QQ))
+                        VerificationPurpose.BIND_SOCIAL))
                 .build());
         if (!start.accepted()) {
             return;
         }
-        VerificationPrompts.sendQqInstruction(plugin, player, start.session().code(),
-                VerificationPurpose.BIND_QQ);
+        VerificationPrompts.sendSocialInstruction(plugin, player, provider.id(), start.session().code(),
+                VerificationPurpose.BIND_SOCIAL);
         start.completion().thenAccept(result -> {
             if (result.status() != VerificationResult.Status.COMPLETED) {
                 player.sendMessage(verificationFailureMessage(result.status()));
                 return;
             }
-            String qq = result.session().resolvedValue();
-            plugin.bindings().bindQq(account, qq, ip)
-                    .thenAccept(outcome -> afterBind(player, account, outcome));
+            String value = result.session().resolvedValue();
+            plugin.bindings().bind(account, provider.id(), value, ip)
+                    .thenAccept(outcome -> afterBind(player, account, provider, outcome));
         });
     }
 
@@ -173,9 +179,9 @@ public final class BindCommand extends PlayerCommandSupport {
      * 绑定收尾：若这次绑定让账号满足了「注册后必须绑定」的要求，则激活账号并自动登录；
      * 否则只提示绑定结果，并在仍缺渠道时继续提示。
      */
-    private void afterBind(Player player, Account account, AuthOutcomes.Bind outcome) {
+    private void afterBind(Player player, Account account, Provider provider, AuthOutcomes.Bind outcome) {
         if (!outcome.ok()) {
-            player.sendMessage(bindMessage(outcome));
+            player.sendMessage(bindMessage(provider, outcome));
             return;
         }
         plugin.authService().activateIfBindingSatisfied(account.id()).thenAccept(activated -> {
@@ -184,7 +190,7 @@ public final class BindCommand extends PlayerCommandSupport {
                         plugin.lang().msg("command.bind.activated"));
                 return;
             }
-            player.sendMessage(bindMessage(outcome));
+            player.sendMessage(bindMessage(provider, outcome));
             if (!plugin.config().registration().requireBinding().isEmpty()
                     && !plugin.authService().bindingSatisfied(account)) {
                 sendBindingRequirement(player);
@@ -192,14 +198,14 @@ public final class BindCommand extends PlayerCommandSupport {
         });
     }
 
-    private net.kyori.adventure.text.Component bindMessage(AuthOutcomes.Bind outcome) {
+    private net.kyori.adventure.text.Component bindMessage(Provider provider, AuthOutcomes.Bind outcome) {
         return switch (outcome.status()) {
             case SUCCESS -> plugin.lang().msg("command.bind.success");
             case ALREADY_BOUND -> plugin.lang().msg("command.bind.already-bound");
             case EMAIL_INVALID -> plugin.lang().msg("command.bind.email-invalid");
             case DOMAIN_NOT_ALLOWED -> plugin.lang().msg("command.bind.domain-not-allowed");
-            case EMAIL_LIMIT -> plugin.lang().msg("command.bind.email-limit");
-            case QQ_LIMIT -> plugin.lang().msg("command.bind.qq-limit");
+            case LIMIT -> plugin.lang().msg("command.bind.limit", "provider", provider.displayName());
+            case COOLDOWN -> plugin.lang().msg("command.bind.cooldown");
             case DISABLED -> plugin.lang().msg("generic.feature-disabled");
             case VERIFICATION_CANCELLED -> plugin.lang().msg("verification.cancelled");
             case VERIFICATION_EXPIRED -> plugin.lang().msg("verification.expired");
@@ -219,7 +225,7 @@ public final class BindCommand extends PlayerCommandSupport {
 
     @Override
     public java.util.List<String> suggest(Invocation invocation) {
-        // /bind <email|qq> [值]
+        // /bind <渠道> [值]
         return suggestBindingChannel(invocation, 0);
     }
 

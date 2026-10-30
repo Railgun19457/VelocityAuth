@@ -27,6 +27,7 @@ final class TestBotClient extends WebSocketClient {
 
     static final String CLIENT_ID = "testbot-1";
     static final String CLIENT_KEY_ID = "bot-k1";
+    static final String PROVIDER = "qq";
 
     private final java.security.KeyPair edPair;
     private final PrivateKey edPrivate;
@@ -42,6 +43,10 @@ final class TestBotClient extends WebSocketClient {
     final CompletableFuture<String> watchReceived = new CompletableFuture<>();
     final CompletableFuture<Boolean> matchedAck = new CompletableFuture<>();
     final CompletableFuture<String> failure = new CompletableFuture<>();
+    final java.util.concurrent.ConcurrentHashMap<String, CompletableFuture<Map<String, Object>>> queryResults =
+            new java.util.concurrent.ConcurrentHashMap<>();
+    final java.util.concurrent.ConcurrentHashMap<String, CompletableFuture<Map<String, Object>>> queryErrors =
+            new java.util.concurrent.ConcurrentHashMap<>();
 
     private String helloId;
     private String clientNonce;
@@ -87,6 +92,7 @@ final class TestBotClient extends WebSocketClient {
         payload.put("client_id", CLIENT_ID);
         payload.put("client_key_id", CLIENT_KEY_ID);
         payload.put("client_public_key", Base64Url.encode(edPublic));
+        payload.put("provider", PROVIDER);
         payload.put("capabilities", List.of("verify.v1"));
         helloId = nextId();
         clientNonce = Crypto.randomNonce();
@@ -200,19 +206,56 @@ final class TestBotClient extends WebSocketClient {
                 watchReceived.complete(code);
                 Map<String, Object> payload = new LinkedHashMap<>();
                 payload.put("code", code);
-                payload.put("qq", "10001");
-                payload.put("group_id", String.valueOf(message.payload().get("group_id")));
-                payload.put("group_nick", "tester");
-                payload.put("is_group_member", true);
+                payload.put("subject", "10001");
+                payload.put("scope", String.valueOf(message.payload().get("provider")));
+                payload.put("display_name", "tester");
                 payload.put("matched_at", System.currentTimeMillis() / 1000L);
                 sendSealed("verify.matched", payload);
             }
             case "verify.matched.ack" ->
                     matchedAck.complete("true".equals(String.valueOf(message.payload().get("consumed"))));
             case "verify.cancel" -> logs.add("cancelled " + message.payload().get("code"));
+            case "query.account.result", "query.lookup.result", "query.history.result",
+                    "query.binding-history.result", "query.stats.result" -> completeQuery(queryResults, message);
+            case "error" -> {
+                if (!completeQuery(queryErrors, message)) {
+                    logs.add("error " + message.payload().get("code"));
+                }
+            }
             case "pong" -> logs.add("pong");
             default -> logs.add("sealed " + message.type());
         }
+    }
+
+    private static boolean completeQuery(
+            java.util.concurrent.ConcurrentHashMap<String, CompletableFuture<Map<String, Object>>> map,
+            Transcript.ParsedMessage message) {
+        Object requestId = message.payload().get("request_id");
+        if (requestId == null) {
+            return false;
+        }
+        CompletableFuture<Map<String, Object>> future = map.get(String.valueOf(requestId));
+        if (future == null) {
+            return false;
+        }
+        future.complete(message.payload());
+        return true;
+    }
+
+    /** 发送一条 {@code query.*} 请求，返回请求 id（用于关联响应）。 */
+    String sendQuery(String type, Map<String, Object> payload) {
+        String id = sendSealed(type, payload);
+        queryResults.putIfAbsent(id, new CompletableFuture<>());
+        queryErrors.putIfAbsent(id, new CompletableFuture<>());
+        return id;
+    }
+
+    Map<String, Object> awaitQueryResult(String requestId, long seconds) throws Exception {
+        return queryResults.get(requestId).get(seconds, TimeUnit.SECONDS);
+    }
+
+    Map<String, Object> awaitQueryError(String requestId, long seconds) throws Exception {
+        return queryErrors.get(requestId).get(seconds, TimeUnit.SECONDS);
     }
 
     private void sendAuthHello() {
@@ -224,6 +267,7 @@ final class TestBotClient extends WebSocketClient {
         payload.put("client_public_key_sha256", Hashes.sha256B64Url(edPublic));
         payload.put("client_ephemeral_key", Base64Url.encode(ephPublic));
         payload.put("client_nonce", clientNonce);
+        payload.put("provider", PROVIDER);
         payload.put("capabilities", List.of("verify.v1"));
         sendPlain("auth.hello", helloId, Crypto.randomNonce(), payload, false);
     }
@@ -236,12 +280,13 @@ final class TestBotClient extends WebSocketClient {
         send(Frame.plain(type, id, ts, nonce, payload, sig).toJson());
     }
 
-    private void sendSealed(String type, Map<String, Object> payload) {
+    private String sendSealed(String type, Map<String, Object> payload) {
         String id = nextId();
         long ts = System.currentTimeMillis() / 1000L;
         long seq = outbound.nextSeq();
         byte[] ct = outbound.seal(Transcript.messagePlaintext(type, id, ts, payload));
         send(Frame.sealed(seq, Base64Url.encode(ct)).toJson());
+        return id;
     }
 
     private void verify(Frame frame, byte[] publicKey, boolean pairContext) {

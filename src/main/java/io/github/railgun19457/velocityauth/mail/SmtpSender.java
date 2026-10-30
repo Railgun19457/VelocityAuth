@@ -101,7 +101,6 @@ public class SmtpSender implements MailSender {
             log.warn("发送邮件失败（收件人域名 {}）：{} - {}",
                     domainOf(to), e.getClass().getSimpleName(), e.getMessage());
             log.debug("邮件发送异常详情", e);
-            log.debug("邮件发送异常详情", e);
             return false;
         }
     }

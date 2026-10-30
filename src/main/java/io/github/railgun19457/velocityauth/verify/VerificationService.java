@@ -1,5 +1,6 @@
 package io.github.railgun19457.velocityauth.verify;
 
+import io.github.railgun19457.velocityauth.auth.Provider;
 import io.github.railgun19457.velocityauth.auth.RateLimiter;
 import io.github.railgun19457.velocityauth.config.VelocityAuthConfig;
 import io.github.railgun19457.velocityauth.lang.LangService;
@@ -23,12 +24,14 @@ import java.util.function.Supplier;
  * <p>
  * 所有需要"证明身份"的场景（注册门槛 / 绑定 / 找回 / 解绑）复用同一套机制：
  * 一次性验证码、TTL、限次、限流，全部只在内存中。
+ * <p>
+ * 渠道无关：{@code email} 走内置 SMTP；其余渠道（社交平台）由 bot 判定命中后回报。
  */
 public final class VerificationService {
 
-    /** QQ 渠道码字符集：去除易混淆字符。 */
-    private static final char[] QQ_ALPHABET = "ABCDEFGHJKMNPQRSTUVWXYZ23456789".toCharArray();
-    private static final String QQ_PREFIX = "MC-";
+    /** 社交渠道码字符集：去除易混淆字符。 */
+    private static final char[] SOCIAL_ALPHABET = "ABCDEFGHJKMNPQRSTUVWXYZ23456789".toCharArray();
+    private static final String SOCIAL_PREFIX = "MC-";
     private static final Duration ONE_MINUTE = Duration.ofMinutes(1);
 
     private final Supplier<VelocityAuthConfig> config;
@@ -36,7 +39,7 @@ public final class VerificationService {
     private final Supplier<String> serverName;
     private final MailSender smtpSender;
     private final EmailTemplateService emailTemplate;
-    private final QqVerificationGateway qqGateway;
+    private final SocialVerificationGateway socialGateway;
     private final RateLimiter rateLimiter;
     private final Timer timer;
     private final PluginLogger log;
@@ -53,7 +56,7 @@ public final class VerificationService {
                                Supplier<String> serverName,
                                MailSender smtpSender,
                                EmailTemplateService emailTemplate,
-                               QqVerificationGateway qqGateway,
+                               SocialVerificationGateway socialGateway,
                                RateLimiter rateLimiter,
                                Timer timer,
                                Executor callbackExecutor,
@@ -63,7 +66,7 @@ public final class VerificationService {
         this.serverName = serverName;
         this.smtpSender = smtpSender;
         this.emailTemplate = emailTemplate;
-        this.qqGateway = qqGateway;
+        this.socialGateway = socialGateway;
         this.rateLimiter = rateLimiter;
         this.timer = timer;
         this.callbackExecutor = callbackExecutor;
@@ -98,13 +101,19 @@ public final class VerificationService {
             return Start.failed("rate_limited");
         }
 
-        if (request.channel() == VerificationChannel.EMAIL && !smtpSender.available()) {
-            request.onDispatch().accept(VerificationDispatch.EMAIL_UNAVAILABLE);
-            return Start.failed("email_unavailable");
+        Optional<Provider> provider = Provider.find(config.get(), request.provider());
+        if (provider.isEmpty() || !provider.get().enabled()) {
+            request.onDispatch().accept(VerificationDispatch.SOCIAL_UNAVAILABLE);
+            return Start.failed("provider_unavailable");
         }
-        if (request.channel() == VerificationChannel.QQ && !qqGateway.available()) {
-            request.onDispatch().accept(VerificationDispatch.QQ_UNAVAILABLE);
-            return Start.failed("qq_unavailable");
+        if (provider.get().email()) {
+            if (!smtpSender.available()) {
+                request.onDispatch().accept(VerificationDispatch.EMAIL_UNAVAILABLE);
+                return Start.failed("email_unavailable");
+            }
+        } else if (!socialGateway.available(provider.get().id())) {
+            request.onDispatch().accept(VerificationDispatch.SOCIAL_UNAVAILABLE);
+            return Start.failed("social_unavailable");
         }
 
         // 同一玩家只允许一个进行中的验证；旧会话标记为被取代
@@ -113,11 +122,11 @@ public final class VerificationService {
             finish(existing, VerificationResult.Status.REPLACED, "replaced");
         }
 
-        String code = generateCode(request.channel());
+        String code = generateCode(provider.get(), rules);
         long now = System.currentTimeMillis();
         long ttlMillis = rules.ttlSeconds() * 1000L;
         VerificationSession session = new VerificationSession(
-                UUID.randomUUID().toString(), request.purpose(), request.channel(), code,
+                UUID.randomUUID().toString(), request.purpose(), provider.get().id(), code,
                 request.playerUuid(), request.accountName(), request.connectionName(), request.ip(),
                 request.target(), request.data(), now, now + ttlMillis, rules.maxAttempts());
 
@@ -129,14 +138,14 @@ public final class VerificationService {
         timer.schedule(() -> finish(session, VerificationResult.Status.EXPIRED, "expired"),
                 Duration.ofSeconds(rules.ttlSeconds()));
 
-        dispatch(request, session, rules);
+        dispatch(request, session, provider.get(), rules);
         return new Start(session, completion, null);
     }
 
-    private void dispatch(VerificationRequest request, VerificationSession session,
+    private void dispatch(VerificationRequest request, VerificationSession session, Provider provider,
                           VelocityAuthConfig.Verification rules) {
         long minutes = Math.max(1, rules.ttlSeconds() / 60);
-        if (session.channel() == VerificationChannel.EMAIL) {
+        if (provider.email()) {
             // {action} 取语言文件里的操作名称，让邮件能区分注册 / 绑定 / 找回等场景
             String action = lang.get().rawText(session.purpose().actionLangKey());
             String subject = emailTemplate.subject(serverName.get(), action);
@@ -151,17 +160,17 @@ public final class VerificationService {
                 }
             });
         } else {
-            qqGateway.watch(session.code(), config.get().qqbot().groupId(), rules.ttlSeconds());
-            request.onDispatch().accept(VerificationDispatch.QQ_WATCHING);
+            socialGateway.watch(provider.id(), session.code(), rules.ttlSeconds());
+            request.onDispatch().accept(VerificationDispatch.SOCIAL_WATCHING);
         }
     }
 
-    private String generateCode(VerificationChannel channel) {
-        VelocityAuthConfig.Verification rules = config.get().verification();
+    private String generateCode(Provider provider, VelocityAuthConfig.Verification rules) {
+        int length = provider.email() || provider.codeLength() <= 0
+                ? Math.max(4, rules.codeLength())
+                : Math.max(4, provider.codeLength());
         for (int attempt = 0; attempt < 32; attempt++) {
-            String code = channel == VerificationChannel.EMAIL
-                    ? randomDigits(Math.max(4, rules.emailCodeLength()))
-                    : randomAlphaNumeric(Math.max(4, rules.qqCodeLength()));
+            String code = provider.email() ? randomDigits(length) : randomAlphaNumeric(length);
             if (!byCode.containsKey(code)) {
                 return code;
             }
@@ -178,9 +187,9 @@ public final class VerificationService {
     }
 
     private String randomAlphaNumeric(int length) {
-        StringBuilder sb = new StringBuilder(QQ_PREFIX);
+        StringBuilder sb = new StringBuilder(SOCIAL_PREFIX);
         for (int i = 0; i < length; i++) {
-            sb.append(QQ_ALPHABET[random.nextInt(QQ_ALPHABET.length)]);
+            sb.append(SOCIAL_ALPHABET[random.nextInt(SOCIAL_ALPHABET.length)]);
         }
         return sb.toString();
     }
@@ -198,18 +207,18 @@ public final class VerificationService {
         EXPIRED,
         /** 尝试次数超限。 */
         TOO_MANY_ATTEMPTS,
-        /** 该验证必须在 QQ 群内完成，游戏内输入无效。 */
+        /** 该验证必须在社交渠道内完成，游戏内输入无效。 */
         WRONG_CHANNEL
     }
 
-    /** 游戏内输入验证码（仅 email 渠道；qq 渠道必须由 bot 回报群消息命中）。 */
+    /** 游戏内输入验证码（仅 email 渠道；社交渠道必须由 bot 回报命中）。 */
     public SubmitOutcome submitCode(UUID playerUuid, String input) {
         VerificationSession session = byPlayer.get(playerUuid);
         if (session == null || session.finished()) {
             return SubmitOutcome.NO_SESSION;
         }
-        // 安全：QQ 渠道的码在公开群里传播，若允许游戏内直接输入就完全失去了"证明持有该 QQ"的意义
-        if (session.channel() == VerificationChannel.QQ) {
+        // 安全：社交渠道的码在公开房间传播，若允许游戏内直接输入就完全失去了"证明持有该账号"的意义
+        if (!isEmail(session.provider())) {
             return SubmitOutcome.WRONG_CHANNEL;
         }
         if (session.expired()) {
@@ -229,26 +238,26 @@ public final class VerificationService {
     }
 
     /**
-     * bot 回报：群消息命中验证码。
+     * bot 回报：社交渠道命中验证码。
+     * <p>
+     * 平台策略（房间、成员、账号格式）已由 bot 侧判定；插件只做渠道无关的接受（码命中、未过期、未完成）。
      *
      * @return 是否消费了该码
      */
-    public boolean onQqMatched(String code, String qq, String groupId, boolean groupMember) {
+    public boolean onSocialMatched(String providerId, String code, String subject, String scope, String displayName) {
         VerificationSession session = byCode.get(code);
-        if (session == null || session.finished() || session.channel() != VerificationChannel.QQ) {
+        if (session == null || session.finished() || isEmail(session.provider())) {
             return false;
         }
-        // 只接受来自配置群的命中，避免被已配对 bot 的异常上报绕过"证明持有该 QQ"
-        String expectedGroup = config.get().qqbot().groupId();
-        if (expectedGroup != null && !expectedGroup.isBlank() && !expectedGroup.equals(groupId)) {
-            log.warn("QQ 验证被拒绝：上报群号 {} 与配置 {} 不一致", groupId, expectedGroup);
+        if (providerId != null && !providerId.isBlank() && !providerId.equals(session.provider())) {
+            log.warn("社交验证被拒绝：上报渠道 {} 与发起渠道 {} 不一致", providerId, session.provider());
             return false;
         }
-        if (config.get().qqbot().requireGroupMember() && !groupMember) {
-            log.warn("QQ 验证被拒绝：{} 不是群成员", qq);
+        if (subject == null || subject.isBlank()) {
+            log.warn("社交验证被拒绝：缺少 subject");
             return false;
         }
-        session.resolvedValue(qq);
+        session.resolvedValue(subject);
         finish(session, VerificationResult.Status.COMPLETED, "completed");
         return true;
     }
@@ -287,14 +296,18 @@ public final class VerificationService {
 
     // ------------------------------------------------------------------ 内部
 
+    private static boolean isEmail(String providerId) {
+        return Provider.EMAIL_ID.equals(providerId);
+    }
+
     private void finish(VerificationSession session, VerificationResult.Status status, String reason) {
         if (!session.markFinishedIfOpen()) {
             return;
         }
         byPlayer.remove(session.playerUuid(), session);
         byCode.remove(session.code(), session);
-        if (session.channel() == VerificationChannel.QQ) {
-            qqGateway.cancel(session.code());
+        if (!isEmail(session.provider())) {
+            socialGateway.cancel(session.provider(), session.code());
         }
         CompletableFuture<VerificationResult> completion = completions.remove(session.id());
         if (completion != null) {

@@ -128,7 +128,7 @@ class ProtocolSessionVectorsTest {
         assertEquals("verify.watch", parsed.type());
         assertEquals("r_1", parsed.id());
         assertEquals("MC-8F3K2A", parsed.payload().get("code"));
-        assertEquals("123456", parsed.payload().get("group_id"));
+        assertEquals("qq", parsed.payload().get("provider"));
         assertEquals("300", parsed.payload().get("ttl"));
     }
 

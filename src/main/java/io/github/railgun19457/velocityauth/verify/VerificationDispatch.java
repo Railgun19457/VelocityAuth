@@ -10,10 +10,10 @@ public enum VerificationDispatch {
     EMAIL_FAILED,
     /** 邮箱服务未启用/不可用。 */
     EMAIL_UNAVAILABLE,
-    /** 已登记到 bot，等待群里发码。 */
-    QQ_WATCHING,
-    /** QQ bot 通道不可用。 */
-    QQ_UNAVAILABLE,
+    /** 已登记到 bot，等待社交渠道发码。 */
+    SOCIAL_WATCHING,
+    /** 社交渠道 bot 不可用。 */
+    SOCIAL_UNAVAILABLE,
     /** 触发限流。 */
     RATE_LIMITED
 }

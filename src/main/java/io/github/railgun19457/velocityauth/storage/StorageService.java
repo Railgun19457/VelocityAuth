@@ -2,12 +2,12 @@ package io.github.railgun19457.velocityauth.storage;
 
 import io.github.railgun19457.velocityauth.config.VelocityAuthConfig;
 import io.github.railgun19457.velocityauth.storage.model.AccountStatus;
-import io.github.railgun19457.velocityauth.storage.model.BindingType;
 import io.github.railgun19457.velocityauth.storage.model.IdentityKind;
 import org.slf4j.Logger;
 
 import java.nio.file.Path;
 import java.sql.SQLException;
+import java.util.Map;
 import java.util.UUID;
 
 /**
@@ -21,6 +21,8 @@ public final class StorageService implements AutoCloseable {
     private final BindingRepository bindings;
     private final SessionRepository sessions;
     private final AuditRepository audit;
+    private final LoginHistoryRepository loginHistory;
+    private final BindingHistoryRepository bindingHistory;
 
     private StorageService(Database database) {
         this.database = database;
@@ -29,6 +31,8 @@ public final class StorageService implements AutoCloseable {
         this.bindings = new BindingRepository(database);
         this.sessions = new SessionRepository(database);
         this.audit = new AuditRepository(database);
+        this.loginHistory = new LoginHistoryRepository(database);
+        this.bindingHistory = new BindingHistoryRepository(database);
     }
 
     public static StorageService open(VelocityAuthConfig.Database config, Path dataDirectory, Logger logger)
@@ -52,16 +56,13 @@ public final class StorageService implements AutoCloseable {
     public long createAccount(String name, String nameLower, UUID uuid, String passwordHash,
                               AccountStatus status, UUID premiumUuid, long createdAt,
                               IdentityKind identityKind, String identityIdentifier,
-                              String email, String qq) {
+                              Map<String, String> bindingsById) {
         return database.inTransaction(connection -> {
             long accountId = accounts.insert(connection, name, nameLower, uuid, passwordHash, status,
                     premiumUuid, createdAt);
             identities.upsert(connection, accountId, identityKind, identityIdentifier, createdAt);
-            if (email != null) {
-                bindings.insert(connection, accountId, BindingType.EMAIL, email, createdAt, createdAt);
-            }
-            if (qq != null) {
-                bindings.insert(connection, accountId, BindingType.QQ, qq, createdAt, createdAt);
+            for (Map.Entry<String, String> entry : bindingsById.entrySet()) {
+                bindings.insert(connection, accountId, entry.getKey(), entry.getValue(), createdAt, createdAt);
             }
             return accountId;
         });
@@ -85,6 +86,14 @@ public final class StorageService implements AutoCloseable {
 
     public AuditRepository audit() {
         return audit;
+    }
+
+    public LoginHistoryRepository loginHistory() {
+        return loginHistory;
+    }
+
+    public BindingHistoryRepository bindingHistory() {
+        return bindingHistory;
     }
 
     public String describe() {

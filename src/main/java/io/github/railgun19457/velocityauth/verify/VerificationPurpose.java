@@ -11,8 +11,8 @@ public enum VerificationPurpose {
     REGISTER("register"),
     /** 绑定邮箱。 */
     BIND_EMAIL("bind-email"),
-    /** 绑定 QQ。 */
-    BIND_QQ("bind-qq"),
+    /** 绑定社交渠道。 */
+    BIND_SOCIAL("bind-social"),
     /** 找回密码。 */
     RECOVER("recover"),
     /** 解绑（需先通过一次验证）。 */

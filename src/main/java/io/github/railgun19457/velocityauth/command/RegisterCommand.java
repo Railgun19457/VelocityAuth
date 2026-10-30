@@ -125,8 +125,7 @@ public final class RegisterCommand extends PlayerCommandSupport {
             // 以下状态不再由注册路径产生，保留兜底以免漏配
             case EMAIL_INVALID -> plugin.lang().msg("command.bind.email-invalid");
             case DOMAIN_NOT_ALLOWED -> plugin.lang().msg("command.bind.domain-not-allowed");
-            case EMAIL_LIMIT -> plugin.lang().msg("command.bind.email-limit");
-            case QQ_LIMIT -> plugin.lang().msg("command.bind.qq-limit");
+            case LIMIT -> plugin.lang().msg("command.bind.limit", "provider", "");
             case VERIFICATION_CANCELLED -> plugin.lang().msg("verification.cancelled");
             case VERIFICATION_EXPIRED -> plugin.lang().msg("verification.expired");
             case VERIFICATION_FAILED -> plugin.lang().msg("generic.internal-error");

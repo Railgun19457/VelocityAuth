@@ -38,13 +38,12 @@ class BotProtocolIntegrationTest {
 
     private static VelocityAuthConfig config(int port) {
         return VelocityAuthConfig.from(ConfigNode.root(Map.of(
-                "qqbot", Map.of(
+                "bot", Map.of(
                         "enabled", true,
                         "listen", "127.0.0.1",
                         "port", port,
-                        "group-id", "123456",
-                        "require-group-member", true,
                         "pairing", Map.of("ttl-seconds", 600, "max-attempts", 5)),
+                "binding", Map.of("social", Map.of("qq", Map.of("enabled", true))),
                 "security", Map.of("handshake-timeout-seconds", 15, "clock-skew-seconds", 120))));
     }
 
@@ -56,12 +55,20 @@ class BotProtocolIntegrationTest {
         PluginLogger log = new PluginLogger(NOPLogger.NOP_LOGGER);
         keyStore = KeyStore.load(tempDir, log);
         pairings = new PairingService();
-        server = new BotServer(config.qqbot(), keyStore, pairings, () -> config, log, new BotServer.Handler() {
+        server = new BotServer(config.bot(), keyStore, pairings, () -> config, log, new BotServer.Handler() {
             @Override
-            public boolean onVerifyMatched(String code, String qq, String groupId, boolean groupMember) {
+            public boolean onVerifyMatched(String providerId, String code, String subject, String scope,
+                                           String displayName) {
                 matchedCalls.incrementAndGet();
-                return "MC-TEST01".equals(code) && groupMember;
+                return "MC-TEST01".equals(code) && "qq".equals(providerId);
             }
+        }, (type, payload) -> switch (type) {
+            case "query.lookup" -> QueryResponse.ok(Map.of(
+                    "found", true, "count", 1, "accounts", List.of("Alice")));
+            case "query.account" -> QueryResponse.ok(Map.of("found", false));
+            case "query.history" -> QueryResponse.error("bad_request", "history disabled in test");
+            case "query.stats" -> QueryResponse.ok(Map.of("accounts_total", 42, "online", 7));
+            default -> QueryResponse.error("bad_request", "unsupported: " + type);
         });
         server.start();
         // 等待端口绑定完成（端口 0 → 由系统分配）
@@ -113,7 +120,7 @@ class BotProtocolIntegrationTest {
         assertEquals(1, server.readyCount());
 
         // 业务消息：verify.watch → verify.matched → ack
-        int sent = server.watch("MC-TEST01", "123456", 300);
+        int sent = server.watch("qq", "MC-TEST01", 300);
         assertEquals(1, sent);
         assertEquals("MC-TEST01", bot.watchReceived.get(10, java.util.concurrent.TimeUnit.SECONDS));
         assertTrue(bot.matchedAck.get(10, java.util.concurrent.TimeUnit.SECONDS));
@@ -187,8 +194,7 @@ class BotProtocolIntegrationTest {
     }
 
     @Test
-    void capabilitiesAndKeyFingerprintArePinned() throws Exception {
-        PairingService.Created created = pairings.create(600, 5);
+    void capabilitiesAndKeyFingerprintArePinned() throws Exception {        PairingService.Created created = pairings.create(600, 5);
         TestBotClient bot = new TestBotClient(uri(),
                 created.code());
         bot.setPairingId(created.pairingId());
@@ -202,6 +208,68 @@ class BotProtocolIntegrationTest {
         assertTrue(keyStore.clients().size() == 1);
         List<String> logs = bot.logs();
         assertTrue(logs.stream().anyMatch(entry -> entry.startsWith("paired")), logs.toString());
+
+        bot.closeBlocking();
+    }
+
+    @Test
+    void queryLookupRoundTrips() throws Exception {
+        PairingService.Created created = pairings.create(600, 5);
+        TestBotClient bot = new TestBotClient(uri(), created.code());
+        bot.setPairingId(created.pairingId());
+        assertTrue(bot.connectBlocking(5, java.util.concurrent.TimeUnit.SECONDS));
+        assertTrue(bot.awaitReady(20), "握手未完成：" + bot.failure.getNow("未完成"));
+
+        String requestId = bot.sendQuery("query.lookup", Map.of("by", "qq", "value", "10001"));
+        Map<String, Object> result = bot.awaitQueryResult(requestId, 10);
+        assertEquals("true", result.get("found"));
+        assertEquals("1", result.get("count"));
+        assertEquals("Alice", result.get("accounts"));
+
+        bot.closeBlocking();
+    }
+
+    @Test
+    void queryAccountFoundFalse() throws Exception {
+        PairingService.Created created = pairings.create(600, 5);
+        TestBotClient bot = new TestBotClient(uri(), created.code());
+        bot.setPairingId(created.pairingId());
+        assertTrue(bot.connectBlocking(5, java.util.concurrent.TimeUnit.SECONDS));
+        assertTrue(bot.awaitReady(20));
+
+        String requestId = bot.sendQuery("query.account", Map.of("by", "name", "value", "ghost"));
+        Map<String, Object> result = bot.awaitQueryResult(requestId, 10);
+        assertEquals("false", result.get("found"));
+
+        bot.closeBlocking();
+    }
+
+    @Test
+    void queryHandlerErrorBecomesSealedError() throws Exception {        PairingService.Created created = pairings.create(600, 5);
+        TestBotClient bot = new TestBotClient(uri(), created.code());
+        bot.setPairingId(created.pairingId());
+        assertTrue(bot.connectBlocking(5, java.util.concurrent.TimeUnit.SECONDS));
+        assertTrue(bot.awaitReady(20));
+
+        String requestId = bot.sendQuery("query.history", Map.of("by", "name", "value", "Alice"));
+        Map<String, Object> error = bot.awaitQueryError(requestId, 10);
+        assertEquals("bad_request", error.get("code"));
+
+        bot.closeBlocking();
+    }
+
+    @Test
+    void queryStatsRoundTrips() throws Exception {
+        PairingService.Created created = pairings.create(600, 5);
+        TestBotClient bot = new TestBotClient(uri(), created.code());
+        bot.setPairingId(created.pairingId());
+        assertTrue(bot.connectBlocking(5, java.util.concurrent.TimeUnit.SECONDS));
+        assertTrue(bot.awaitReady(20));
+
+        String requestId = bot.sendQuery("query.stats", Map.of());
+        Map<String, Object> result = bot.awaitQueryResult(requestId, 10);
+        assertEquals("42", result.get("accounts_total"));
+        assertEquals("7", result.get("online"));
 
         bot.closeBlocking();
     }

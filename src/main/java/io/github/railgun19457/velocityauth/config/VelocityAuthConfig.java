@@ -1,9 +1,12 @@
 package io.github.railgun19457.velocityauth.config;
 
-import io.github.railgun19457.velocityauth.storage.model.BindingType;
-
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Locale;
+import java.util.Map;
+import java.util.Set;
 import java.util.regex.Pattern;
 import java.util.regex.PatternSyntaxException;
 
@@ -19,14 +22,15 @@ public record VelocityAuthConfig(
         Binding binding,
         Verification verification,
         Smtp smtp,
-        QqBot qqbot,
+        Bot bot,
         Proxy proxy,
         Security security
 ) {
 
     // ---------------------------------------------------------------- database
 
-    public record Database(Type type, Sqlite sqlite, Mysql mysql) {
+    public record Database(Type type, Sqlite sqlite, Mysql mysql,
+                           int loginHistoryDays, int auditLogDays, int bindingHistoryDays) {
         public enum Type { SQLITE, MYSQL }
     }
 
@@ -76,34 +80,43 @@ public record VelocityAuthConfig(
     /**
      * 注册行为与「注册后必须绑定」的要求。
      *
-     * @param requireBinding     注册后必须完成的绑定渠道，玩家**任选其一**即可；
+     * @param requireBinding     注册后必须完成的绑定渠道（provider id），玩家**任选其一**即可；
      *                           空列表表示无需绑定（注册完即可登录）。
      * @param unboundTtlMinutes  未绑定账号的存活时间（分钟），超时自动清除；0 表示不自动清除。
      */
-    public record Registration(List<BindingType> requireBinding, int unboundTtlMinutes) {
+    public record Registration(List<String> requireBinding, int unboundTtlMinutes) {
 
         public boolean bindingRequired() {
             return !requireBinding.isEmpty();
         }
     }
 
-    public record Binding(EmailBinding email, QqBinding qq) {
+    /**
+     * 绑定渠道配置：内置邮箱 + 任意社交渠道。
+     *
+     * @param email  内置邮箱（SMTP）渠道
+     * @param social 社交渠道：provider id → 配置
+     */
+    public record Binding(EmailBinding email, Map<String, SocialBinding> social) {
     }
 
-    public record EmailBinding(boolean enabled, int maxAccountsPerEmail, Domain domain) {
+    public record EmailBinding(boolean enabled, int maxAccounts, int cooldownMinutes, Domain domain) {
+    }
+
+    /**
+     * 社交渠道配置。平台相关的一切（监听房间、成员校验、账号格式）由 bot 侧负责。
+     */
+    public record SocialBinding(boolean enabled, String displayName, int maxAccounts, int cooldownMinutes,
+                                int codeLength) {
     }
 
     public record Domain(Mode mode, List<String> list) {
         public enum Mode { OFF, WHITELIST, BLACKLIST }
     }
 
-    public record QqBinding(boolean enabled, int maxAccountsPerQq) {
-    }
-
     // ---------------------------------------------------------------- verification
 
-    public record Verification(int emailCodeLength, int qqCodeLength, int ttlSeconds, int maxAttempts,
-                               RateLimit rateLimit) {
+    public record Verification(int codeLength, int ttlSeconds, int maxAttempts, RateLimit rateLimit) {
     }
 
     public record RateLimit(int perIpPerMinute, int perAccountPerMinute) {
@@ -115,13 +128,21 @@ public record VelocityAuthConfig(
                        String from, int timeoutSeconds) {
     }
 
-    // ---------------------------------------------------------------- qq bot
+    // ---------------------------------------------------------------- bot 通道
 
-    public record QqBot(boolean enabled, String listen, int port, String groupId, String privateNumber,
-                        boolean requireGroupMember, Pairing pairing) {
+    public record Bot(boolean enabled, String listen, int port, Pairing pairing, Query query) {
     }
 
     public record Pairing(int ttlSeconds, int maxAttempts, String bootstrapCode) {
+    }
+
+    /**
+     * bot 侧玩家信息查询接口（PROTOCOL.md 8）。
+     *
+     * @param enabled    是否启用；默认关闭。启用后插件在 capabilities 里声明 {@code query.v1}
+     * @param maxResults 单次查询返回的最大条数（列表 / 历史记录）
+     */
+    public record Query(boolean enabled, int maxResults) {
     }
 
     // ---------------------------------------------------------------- proxy / security
@@ -141,15 +162,28 @@ public record VelocityAuthConfig(
         String dbType = db.enumValue("type", "sqlite", "sqlite", "mysql");
         ConfigNode sqlite = db.section("sqlite");
         ConfigNode mysql = db.section("mysql");
+        int loginHistoryDays = db.intValue("login-history-days", 90);
+        int auditLogDays = db.intValue("audit-log-days", 90);
+        int bindingHistoryDays = db.intValue("binding-history-days", 90);
+        if (loginHistoryDays < 0) {
+            throw new ConfigException("database.login-history-days", "不能为负数（0 表示永久保留）");
+        }
+        if (auditLogDays < 0) {
+            throw new ConfigException("database.audit-log-days", "不能为负数（0 表示永久保留）");
+        }
+        if (bindingHistoryDays < 0) {
+            throw new ConfigException("database.binding-history-days", "不能为负数（0 表示永久保留）");
+        }
         Database database = new Database(
-                Database.Type.valueOf(dbType.toUpperCase()),
+                Database.Type.valueOf(dbType.toUpperCase(Locale.ROOT)),
                 new Sqlite(sqlite.string("file", "velocityauth.db")),
                 new Mysql(
                         mysql.string("host", "127.0.0.1"),
                         mysql.intValue("port", 3306),
                         mysql.string("database", "velocityauth"),
                         mysql.string("username", "root"),
-                        mysql.string("password", "")));
+                        mysql.string("password", "")),
+                loginHistoryDays, auditLogDays, bindingHistoryDays);
 
         ConfigNode sv = root.section("servers");
         Servers servers = new Servers(
@@ -209,32 +243,6 @@ public record VelocityAuthConfig(
         Auth auth = new Auth(accountName, password, bcryptCost, session, premium,
                 new Bedrock(authNode.section("bedrock").bool("auto-link", true)));
 
-        ConfigNode regNode = root.section("registration");
-        List<BindingType> requireBinding = new ArrayList<>();
-        if (regNode.has("require-binding")) {
-            for (String raw : regNode.stringListOrScalar("require-binding", List.of())) {
-                BindingType type = BindingType.fromName(raw);
-                if (type == null) {
-                    throw new ConfigException("registration.require-binding",
-                            "取值 \"" + raw + "\" 不合法，可选值：email | qq");
-                }
-                if (!requireBinding.contains(type)) {
-                    requireBinding.add(type);
-                }
-            }
-        } else if (regNode.has("gate")) {
-            // 兼容旧配置：registration.gate = none | email | qq
-            String legacy = regNode.enumValue("gate", "none", "none", "email", "qq");
-            if (!legacy.equals("none")) {
-                requireBinding.add(BindingType.fromName(legacy));
-            }
-        }
-        int unboundTtlMinutes = regNode.intValue("unbound-ttl-minutes", 30);
-        if (unboundTtlMinutes < 0) {
-            throw new ConfigException("registration.unbound-ttl-minutes", "不能为负数（0 表示不自动清除）");
-        }
-        Registration registration = new Registration(List.copyOf(requireBinding), unboundTtlMinutes);
-
         ConfigNode bindNode = root.section("binding");
         ConfigNode emailNode = bindNode.section("email");
         ConfigNode domainNode = emailNode.section("domain");
@@ -248,19 +256,68 @@ public record VelocityAuthConfig(
                 domainNode.stringList("list", List.of()));
         EmailBinding emailBinding = new EmailBinding(
                 emailNode.bool("enabled", true),
-                emailNode.intValue("max-accounts-per-email", 1),
+                emailNode.intValue("max-accounts", 1),
+                emailNode.intValue("cooldown-minutes", 0),
                 domain);
-        ConfigNode qqBindNode = bindNode.section("qq");
-        QqBinding qqBinding = new QqBinding(
-                qqBindNode.bool("enabled", true),
-                qqBindNode.intValue("max-accounts-per-qq", 1));
-        Binding binding = new Binding(emailBinding, qqBinding);
+        if (emailBinding.maxAccounts() < 1) {
+            throw new ConfigException("binding.email.max-accounts", "必须为正数");
+        }
+        if (emailBinding.cooldownMinutes() < 0) {
+            throw new ConfigException("binding.email.cooldown-minutes", "不能为负数（0 表示不启用冷却）");
+        }
+
+        // 社交渠道：binding.social.<provider-id>（任意平台，由 bot 适配器实现）
+        Map<String, SocialBinding> social = new LinkedHashMap<>();
+        for (Map.Entry<String, ConfigNode> entry : bindNode.section("social").children().entrySet()) {
+            String id = entry.getKey().toLowerCase(Locale.ROOT);
+            String path = "binding.social." + entry.getKey();
+            if (id.equals("email")) {
+                throw new ConfigException(path, "email 是内置渠道，不能作为社交渠道配置");
+            }
+            ConfigNode node = entry.getValue();
+            SocialBinding socialBinding = new SocialBinding(
+                    node.bool("enabled", true),
+                    node.string("display-name", entry.getKey()),
+                    node.intValue("max-accounts", 1),
+                    node.intValue("cooldown-minutes", 0),
+                    node.intValue("code-length", 0));
+            if (socialBinding.maxAccounts() < 1) {
+                throw new ConfigException(path + ".max-accounts", "必须为正数");
+            }
+            if (socialBinding.cooldownMinutes() < 0) {
+                throw new ConfigException(path + ".cooldown-minutes", "不能为负数（0 表示不启用冷却）");
+            }
+            social.put(id, socialBinding);
+        }
+        Binding binding = new Binding(emailBinding, Map.copyOf(social));
+
+        // 已知渠道 id（email + social），用于校验 registration.require-binding
+        Set<String> knownProviders = new LinkedHashSet<>();
+        knownProviders.add("email");
+        knownProviders.addAll(social.keySet());
+
+        ConfigNode regNode = root.section("registration");
+        List<String> requireBinding = new ArrayList<>();
+        for (String raw : regNode.stringListOrScalar("require-binding", List.of())) {
+            String id = raw.toLowerCase(Locale.ROOT);
+            if (!knownProviders.contains(id)) {
+                throw new ConfigException("registration.require-binding",
+                        "取值 \"" + raw + "\" 不是已配置的绑定渠道，可选值：" + String.join(" | ", knownProviders));
+            }
+            if (!requireBinding.contains(id)) {
+                requireBinding.add(id);
+            }
+        }
+        int unboundTtlMinutes = regNode.intValue("unbound-ttl-minutes", 30);
+        if (unboundTtlMinutes < 0) {
+            throw new ConfigException("registration.unbound-ttl-minutes", "不能为负数（0 表示不自动清除）");
+        }
+        Registration registration = new Registration(List.copyOf(requireBinding), unboundTtlMinutes);
 
         ConfigNode verNode = root.section("verification");
         ConfigNode rateNode = verNode.section("rate-limit");
         Verification verification = new Verification(
-                verNode.intValue("email-code-length", 6),
-                verNode.intValue("qq-code-length", 6),
+                verNode.intValue("code-length", 6),
                 verNode.intValue("ttl-seconds", 300),
                 verNode.intValue("max-attempts", 5),
                 new RateLimit(
@@ -271,6 +328,9 @@ public record VelocityAuthConfig(
         }
         if (verification.maxAttempts() <= 0) {
             throw new ConfigException("verification.max-attempts", "必须为正数");
+        }
+        if (verification.codeLength() < 4) {
+            throw new ConfigException("verification.code-length", "至少为 4");
         }
 
         ConfigNode smtpNode = root.section("smtp");
@@ -284,19 +344,24 @@ public record VelocityAuthConfig(
                 smtpNode.string("from", "VelocityAuth <example@qq.com>"),
                 smtpNode.intValue("timeout-seconds", 10));
 
-        ConfigNode qqbotNode = root.section("qqbot");
-        ConfigNode pairingNode = qqbotNode.section("pairing");
-        QqBot qqbot = new QqBot(
-                qqbotNode.bool("enabled", false),
-                qqbotNode.string("listen", "0.0.0.0"),
-                qqbotNode.intValue("port", 8765),
-                qqbotNode.string("group-id", ""),
-                qqbotNode.string("private-number", ""),
-                qqbotNode.bool("require-group-member", true),
+        ConfigNode botNode = root.section("bot");
+        ConfigNode pairingNode = botNode.section("pairing");
+        ConfigNode queryNode = botNode.section("query");
+        int maxResults = queryNode.intValue("max-results", 50);
+        if (maxResults < 1) {
+            throw new ConfigException("bot.query.max-results", "必须为正数");
+        }
+        Bot bot = new Bot(
+                botNode.bool("enabled", false),
+                botNode.string("listen", "0.0.0.0"),
+                botNode.intValue("port", 8765),
                 new Pairing(
                         pairingNode.intValue("ttl-seconds", 600),
                         pairingNode.intValue("max-attempts", 5),
-                        pairingNode.string("bootstrap-code", "")));
+                        pairingNode.string("bootstrap-code", "")),
+                new Query(
+                        queryNode.bool("enabled", false),
+                        maxResults));
 
         ConfigNode proxyNode = root.section("proxy");
         Proxy proxy = new Proxy(
@@ -309,6 +374,6 @@ public record VelocityAuthConfig(
                 secNode.intValue("clock-skew-seconds", 120));
 
         return new VelocityAuthConfig(language, database, servers, auth, registration, binding, verification,
-                smtp, qqbot, proxy, security);
+                smtp, bot, proxy, security);
     }
 }

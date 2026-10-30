@@ -6,6 +6,7 @@ import io.github.railgun19457.velocityauth.auth.AuthSession;
 import io.github.railgun19457.velocityauth.auth.AuthSessionRegistry;
 import io.github.railgun19457.velocityauth.storage.model.Account;
 import io.github.railgun19457.velocityauth.storage.model.AuditEntry;
+import io.github.railgun19457.velocityauth.storage.model.LoginHistory;
 
 /**
  * {@code /logout}
@@ -36,6 +37,9 @@ public final class LogoutCommand extends PlayerCommandSupport {
                     plugin.storage().audit().log(
                             io.github.railgun19457.velocityauth.auth.AuthService.nowSeconds(),
                             accountId, AuditEntry.LOGOUT, ip, "command");
+                    plugin.storage().loginHistory().insert(
+                            accountId, io.github.railgun19457.velocityauth.auth.AuthService.nowSeconds(),
+                            ip, LoginHistory.LOGOUT, session.connectionName(), "command");
                 } catch (RuntimeException e) {
                     plugin.log().warn("登出清理失败：{}", e.getMessage());
                 }

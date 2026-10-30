@@ -10,6 +10,7 @@ import java.sql.SQLException;
 import java.sql.Statement;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -96,6 +97,24 @@ public final class AccountRepository {
             try (PreparedStatement ps = connection.prepareStatement(
                     "SELECT " + COLUMNS + " FROM accounts WHERE name_lower LIKE ? ORDER BY name_lower LIMIT ?")) {
                 ps.setString(1, prefixLower + "%");
+                ps.setInt(2, limit);
+                try (ResultSet rs = ps.executeQuery()) {
+                    List<Account> out = new ArrayList<>();
+                    while (rs.next()) {
+                        out.add(map(rs));
+                    }
+                    return out;
+                }
+            }
+        });
+    }
+
+    /** 最近一次登录 IP 为 {@code ip} 的账号（用于按 IP 反查）。 */
+    public List<Account> findByLastIp(String ip, int limit) {
+        return database.withConnection(connection -> {
+            try (PreparedStatement ps = connection.prepareStatement(
+                    "SELECT " + COLUMNS + " FROM accounts WHERE last_ip = ? ORDER BY last_login_at DESC LIMIT ?")) {
+                ps.setString(1, ip);
                 ps.setInt(2, limit);
                 try (ResultSet rs = ps.executeQuery()) {
                     List<Account> out = new ArrayList<>();
@@ -226,6 +245,34 @@ public final class AccountRepository {
             try (PreparedStatement ps = connection.prepareStatement("SELECT COUNT(*) FROM accounts");
                  ResultSet rs = ps.executeQuery()) {
                 return rs.next() ? rs.getInt(1) : 0;
+            }
+        });
+    }
+
+    /** 按状态分组的账号数（status → count）。 */
+    public Map<String, Integer> countByStatus() {
+        return database.withConnection(connection -> {
+            try (PreparedStatement ps = connection.prepareStatement(
+                    "SELECT status, COUNT(*) FROM accounts GROUP BY status");
+                 ResultSet rs = ps.executeQuery()) {
+                Map<String, Integer> out = new java.util.LinkedHashMap<>();
+                while (rs.next()) {
+                    out.put(rs.getString(1), rs.getInt(2));
+                }
+                return out;
+            }
+        });
+    }
+
+    /** 注册时间不早于 {@code since}（unix 秒）的账号数。 */
+    public int countCreatedSince(long since) {
+        return database.withConnection(connection -> {
+            try (PreparedStatement ps = connection.prepareStatement(
+                    "SELECT COUNT(*) FROM accounts WHERE created_at >= ?")) {
+                ps.setLong(1, since);
+                try (ResultSet rs = ps.executeQuery()) {
+                    return rs.next() ? rs.getInt(1) : 0;
+                }
             }
         });
     }

@@ -46,8 +46,7 @@ public final class AuthOutcomes {
         RATE_LIMITED,
         EMAIL_INVALID,
         DOMAIN_NOT_ALLOWED,
-        EMAIL_LIMIT,
-        QQ_LIMIT,
+        LIMIT,
         VERIFICATION_CANCELLED,
         VERIFICATION_EXPIRED,
         VERIFICATION_FAILED,
@@ -87,8 +86,10 @@ public final class AuthOutcomes {
         NOT_BOUND,
         EMAIL_INVALID,
         DOMAIN_NOT_ALLOWED,
-        EMAIL_LIMIT,
-        QQ_LIMIT,
+        /** 该标识已绑定的账号数达上限。 */
+        LIMIT,
+        /** 该标识刚被解绑或随账号注销释放，处于冷却期。 */
+        COOLDOWN,
         DISABLED,
         VERIFICATION_CANCELLED,
         VERIFICATION_EXPIRED,

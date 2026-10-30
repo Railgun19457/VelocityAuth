@@ -12,9 +12,9 @@ package io.github.railgun19457.velocityauth.bot.protocol;
  */
 public final class KeySchedule {
 
-    public static final byte[] SALT_PREFIX = "VELOCITYAUTH-V1-SALT".getBytes(java.nio.charset.StandardCharsets.UTF_8);
-    public static final byte[] INFO_C2S = "velocityauth c2s".getBytes(java.nio.charset.StandardCharsets.UTF_8);
-    public static final byte[] INFO_S2C = "velocityauth s2c".getBytes(java.nio.charset.StandardCharsets.UTF_8);
+    private static final byte[] SALT_PREFIX = "VELOCITYAUTH-V1-SALT".getBytes(java.nio.charset.StandardCharsets.UTF_8);
+    private static final byte[] INFO_C2S = "velocityauth c2s".getBytes(java.nio.charset.StandardCharsets.UTF_8);
+    private static final byte[] INFO_S2C = "velocityauth s2c".getBytes(java.nio.charset.StandardCharsets.UTF_8);
 
     private KeySchedule() {
     }

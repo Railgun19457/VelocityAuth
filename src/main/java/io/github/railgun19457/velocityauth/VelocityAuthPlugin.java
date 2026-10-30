@@ -18,13 +18,16 @@ import io.github.railgun19457.velocityauth.auth.PendingBindingStore;
 import io.github.railgun19457.velocityauth.auth.RateLimiter;
 import io.github.railgun19457.velocityauth.auth.ReconnectService;
 import io.github.railgun19457.velocityauth.auth.RecoveryService;
-import io.github.railgun19457.velocityauth.bot.BotQqGateway;
+import io.github.railgun19457.velocityauth.bot.BotQueryHandler;
+import io.github.railgun19457.velocityauth.bot.BotSocialGateway;
+import io.github.railgun19457.velocityauth.bot.AccountQueryHandler;
 import io.github.railgun19457.velocityauth.bot.BotServer;
 import io.github.railgun19457.velocityauth.bot.BotSession;
 import io.github.railgun19457.velocityauth.bot.KeyStore;
 import io.github.railgun19457.velocityauth.auth.IdentityResolver;
 import io.github.railgun19457.velocityauth.platform.FloodgateHook;
 import io.github.railgun19457.velocityauth.bot.PairingService;
+import io.github.railgun19457.velocityauth.query.AccountQueryService;
 import io.github.railgun19457.velocityauth.mail.EmailTemplateService;
 import io.github.railgun19457.velocityauth.mail.SmtpSender;
 import io.github.railgun19457.velocityauth.command.CommandRegistrar;
@@ -38,7 +41,7 @@ import io.github.railgun19457.velocityauth.listener.RoutingListener;
 import io.github.railgun19457.velocityauth.storage.StorageService;
 import io.github.railgun19457.velocityauth.util.AsyncExecutor;
 import io.github.railgun19457.velocityauth.util.PluginLogger;
-import io.github.railgun19457.velocityauth.verify.QqVerificationGateway;
+import io.github.railgun19457.velocityauth.verify.SocialVerificationGateway;
 import io.github.railgun19457.velocityauth.verify.VerificationService;
 import net.kyori.adventure.text.serializer.plain.PlainTextComponentSerializer;
 import org.slf4j.Logger;
@@ -54,7 +57,7 @@ import java.time.Duration;
         id = BuildConstants.ID,
         name = BuildConstants.NAME,
         version = BuildConstants.VERSION,
-        description = "Account + password authentication with optional email/QQ verification and recovery.",
+        description = "Account + password authentication with optional email/social verification and recovery.",
         authors = {"Railgun19457"},
         dependencies = {
                 @Dependency(id = "floodgate", optional = true)
@@ -83,6 +86,7 @@ public final class VelocityAuthPlugin {
     private BotServer botServer;
     private FloodgateHook floodgate;
     private IdentityResolver identityResolver;
+    private AccountQueryService queryService;
 
     private RoutingListener routingListener;
 
@@ -117,6 +121,7 @@ public final class VelocityAuthPlugin {
             cache.load();
             BindingIndex bindingIndex = new BindingIndex(storage.bindings(), log);
             bindingIndex.load();
+            this.queryService = new AccountQueryService(storage, cache);
 
             PasswordHasher hasher = new PasswordHasher(config.auth().bcryptCost());
             PendingBindingStore pendingBindings = new PendingBindingStore();
@@ -134,14 +139,14 @@ public final class VelocityAuthPlugin {
             emailTemplate.load();
             this.keyStore = KeyStore.load(dataDirectory, log);
             this.pairingService = new PairingService();
-            QqVerificationGateway qqGateway = new BotQqGateway(this::config, () -> botServer);
+            SocialVerificationGateway socialGateway = new BotSocialGateway(this::config, () -> botServer);
             this.verificationService = new VerificationService(this::config, this::lang, this::serverName,
-                    smtpSender, emailTemplate, qqGateway, rateLimiter,
+                    smtpSender, emailTemplate, socialGateway, rateLimiter,
                     (task, delay) -> server.getScheduler().buildTask(this, task).delay(delay).schedule(),
                     async, log);
             startBotServer();
             this.bindingService = new BindingService(this::config, storage, bindingIndex, async, log);
-            this.recoveryService = new RecoveryService(this::config, storage, verificationService, async, log);
+            this.recoveryService = new RecoveryService(storage, verificationService, async);
 
             registerListeners();
             new CommandRegistrar(this, sessionRegistry).registerPlayerCommands();
@@ -182,9 +187,9 @@ public final class VelocityAuthPlugin {
     }
 
     private void startBotServer() {
-        VelocityAuthConfig.QqBot settings = config().qqbot();
+        VelocityAuthConfig.Bot settings = config().bot();
         if (!settings.enabled()) {
-            log.info("QQ bot 通道未启用（qqbot.enabled=false）");
+            log.info("bot 通道未启用（bot.enabled=false）");
             return;
         }
         // 无控制台部署：可用 config.yml 的 bootstrap-code 预置一次配对
@@ -196,18 +201,24 @@ public final class VelocityAuthPlugin {
             log.info("已按配置预置配对（bootstrap）：pairing_id={}，TTL {} 秒",
                     created.pairingId(), created.ttlSeconds());
         }
+        BotQueryHandler queryHandler = settings.query().enabled()
+                ? new AccountQueryHandler(queryService, this::config,
+                        () -> sessionRegistry == null ? 0 : sessionRegistry.authenticatedSessions().size(),
+                        () -> botServer == null ? 0 : botServer.readyCount())
+                : null;
         this.botServer = new BotServer(settings, keyStore, pairingService, this::config, log,
                 new BotServer.Handler() {
                     @Override
-                    public boolean onVerifyMatched(String code, String qq, String groupId, boolean groupMember) {
-                        return verificationService.onQqMatched(code, qq, groupId, groupMember);
+                    public boolean onVerifyMatched(String providerId, String code, String subject, String scope,
+                                                   String displayName) {
+                        return verificationService.onSocialMatched(providerId, code, subject, scope, displayName);
                     }
 
                     @Override
                     public void onSessionReady(BotSession session) {
-                        log.info("bot 会话就绪：client_id={}", session.clientId());
+                        log.info("bot 会话就绪：client_id={} provider={}", session.clientId(), session.provider());
                     }
-                });
+                }, queryHandler);
         try {
             this.botServer.start();
         } catch (RuntimeException e) {
@@ -333,6 +344,11 @@ public final class VelocityAuthPlugin {
 
     public IdentityResolver identities() {
         return identityResolver;
+    }
+
+    /** 玩家信息查询服务（bot 查询接口与 /vauth account info 共用）。 */
+    public AccountQueryService queries() {
+        return queryService;
     }
 
     /** 路由监听器（已认证玩家的目标子服选择）。 */

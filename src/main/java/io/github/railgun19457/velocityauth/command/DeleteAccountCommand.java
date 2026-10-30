@@ -4,10 +4,9 @@ import com.velocitypowered.api.proxy.Player;
 import io.github.railgun19457.velocityauth.VelocityAuthPlugin;
 import io.github.railgun19457.velocityauth.auth.AuthSession;
 import io.github.railgun19457.velocityauth.auth.AuthSessionRegistry;
+import io.github.railgun19457.velocityauth.auth.Provider;
 import io.github.railgun19457.velocityauth.storage.model.Account;
 import io.github.railgun19457.velocityauth.storage.model.Binding;
-import io.github.railgun19457.velocityauth.storage.model.BindingType;
-import io.github.railgun19457.velocityauth.verify.VerificationChannel;
 import io.github.railgun19457.velocityauth.verify.VerificationPurpose;
 import io.github.railgun19457.velocityauth.verify.VerificationRequest;
 import io.github.railgun19457.velocityauth.verify.VerificationService;
@@ -40,21 +39,23 @@ public final class DeleteAccountCommand extends PlayerCommandSupport {
             return;
         }
 
-        // 二次验证渠道：优先邮箱，其次 QQ
-        Optional<Binding> email = plugin.bindings().binding(account.id(), BindingType.EMAIL);
-        Optional<Binding> qq = plugin.bindings().binding(account.id(), BindingType.QQ);
-        VerificationChannel channel;
-        String target;
-        if (email.isPresent()) {
-            channel = VerificationChannel.EMAIL;
-            target = email.get().identifier();
-        } else if (qq.isPresent()) {
-            channel = VerificationChannel.QQ;
-            target = null;
-        } else {
+        // 二次验证渠道：按配置渠道顺序取第一个已绑定的（email 优先）
+        Provider provider = null;
+        Binding chosen = null;
+        for (Provider candidate : Provider.all(plugin.config())) {
+            Optional<Binding> found = plugin.bindings().binding(account.id(), candidate.id());
+            if (found.isPresent()) {
+                provider = candidate;
+                chosen = found.get();
+                break;
+            }
+        }
+        if (provider == null) {
             player.sendMessage(plugin.lang().msg("command.deleteaccount.no-binding"));
             return;
         }
+        String providerId = provider.id();
+        String target = provider.email() ? chosen.identifier() : null;
 
         long accountId = account.id();
         String accountName = account.name();
@@ -64,7 +65,7 @@ public final class DeleteAccountCommand extends PlayerCommandSupport {
         player.sendMessage(plugin.lang().msg("command.deleteaccount.request", "account", accountName));
 
         VerificationService.Start start = plugin.verifications().start(VerificationRequest
-                .builder(VerificationPurpose.DELETE_ACCOUNT, channel, player.getUniqueId())
+                .builder(VerificationPurpose.DELETE_ACCOUNT, providerId, player.getUniqueId())
                 .accountName(account.nameLower())
                 .connectionName(connectionName)
                 .ip(ip)
@@ -76,8 +77,8 @@ public final class DeleteAccountCommand extends PlayerCommandSupport {
         if (!start.accepted()) {
             return;
         }
-        if (channel == VerificationChannel.QQ) {
-            VerificationPrompts.sendQqInstruction(plugin, player, start.session().code(),
+        if (!provider.email()) {
+            VerificationPrompts.sendSocialInstruction(plugin, player, providerId, start.session().code(),
                     VerificationPurpose.DELETE_ACCOUNT);
         }
 
