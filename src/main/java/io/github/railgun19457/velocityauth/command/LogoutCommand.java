@@ -45,7 +45,24 @@ public final class LogoutCommand extends PlayerCommandSupport {
                 }
             });
         }
-        player.disconnect(plugin.lang().msg("auth.logout-disconnect"));
+        // 退出登录后回到登录大厅，而不是把玩家踢出服务器
+        plugin.server().getServer(plugin.config().servers().login()).ifPresentOrElse(lobby -> {
+            String current = player.getCurrentServer()
+                    .map(server -> server.getServerInfo().getName())
+                    .orElse("");
+            if (current.equals(lobby.getServerInfo().getName())) {
+                // 已经在登录服：只提示，不用切服
+                player.sendMessage(plugin.lang().msg("command.logout.success"));
+                return;
+            }
+            player.sendMessage(plugin.lang().msg("command.logout.success"));
+            player.createConnectionRequest(lobby).fireAndForget();
+        }, () -> {
+            // 登录服未注册：退回原来的行为，断开并提示重连
+            plugin.log().warn("登录服 {} 未注册，/logout 只能断开连接",
+                    plugin.config().servers().login());
+            player.disconnect(plugin.lang().msg("command.logout.no-lobby"));
+        });
     }
 
     @Override

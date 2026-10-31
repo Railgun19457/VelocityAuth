@@ -1,4 +1,4 @@
-# version: 5
+# version: 6
 # ============ VelocityAuth English language file ============
 # Text uses MiniMessage syntax; {xxx} are placeholders.
 prefix: "<gold>[Auth]</gold> "
@@ -37,7 +37,8 @@ command:
     already-registered: "<red>You are already registered or logged in.</red>"
     rate-limited: "<red>Too many registrations, please try again later.</red>"
   logout:
-    success: "<yellow>Logged out. Please reconnect.</yellow>"
+    success: "<yellow>Logged out, returning to the login lobby…</yellow>"
+    no-lobby: "<yellow>Logged out. Please reconnect.</yellow>"
     not-authenticated: "<red>You are not logged in.</red>"
   verify:
     usage: "<red>Usage: /verify <code> (or /verify cancel)</red>"

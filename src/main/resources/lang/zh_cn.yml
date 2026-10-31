@@ -1,4 +1,4 @@
-# version: 5
+# version: 6
 # ============ VelocityAuth 中文语言文件 ============
 # 文本使用 MiniMessage 语法；{xxx} 为占位符。
 prefix: "<gold>[认证]</gold> "
@@ -37,7 +37,8 @@ command:
     already-registered: "<red>你已经注册或登录了。</red>"
     rate-limited: "<red>注册过于频繁，请稍后再试。</red>"
   logout:
-    success: "<yellow>已退出登录，请重新连接。</yellow>"
+    success: "<yellow>已退出登录，正在返回登录大厅…</yellow>"
+    no-lobby: "<yellow>已退出登录，请重新连接。</yellow>"
     not-authenticated: "<red>你尚未登录。</red>"
   verify:
     usage: "<red>用法：/verify <验证码>（或 /verify cancel 取消）</red>"
