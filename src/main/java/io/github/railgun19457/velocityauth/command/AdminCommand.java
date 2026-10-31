@@ -404,32 +404,6 @@ public final class AdminCommand implements SimpleCommand {
     }
 
     @Override
-    public List<String> suggest(Invocation invocation) {
-        String[] args = invocation.arguments();
-        // args.length == 0 表示玩家已打出内容但 Velocity 未回传，无法判断位置 → 给首层全集
-        if (args.length <= 1) {
-            return filter(List.of("status", "reload", "account", "sessions", "forcelogin", "pair", "client"),
-                    args.length == 1 ? args[0] : "");
-        }
-        return switch (args[0].toLowerCase(Locale.ROOT)) {
-            case "account" -> args.length == 2 || args.length == 3
-                    ? filter(List.of("info", "setpassword", "unbind", "lock", "unlock", "delete"),
-                    args.length == 3 ? args[2] : "")
-                    : List.of();
-            case "sessions" -> args.length == 2 ? filter(List.of("list", "kick"), args[1]) : List.of();
-            case "pair" -> args.length == 2 ? filter(List.of("new", "list", "revoke"), args[1]) : List.of();
-            case "client" -> args.length == 2 ? filter(List.of("list", "revoke"), args[1]) : List.of();
-            default -> List.of();
-        };
-    }
-
-    /** 按前缀过滤候选（大小写不敏感）。 */
-    private static List<String> filter(List<String> candidates, String prefix) {
-        String p = prefix == null ? "" : prefix.toLowerCase(Locale.ROOT);
-        return candidates.stream().filter(value -> value.startsWith(p)).toList();
-    }
-
-    @Override
     public boolean hasPermission(Invocation invocation) {
         // 同时作为命令节点的 requires 谓词：权限不足时该命令不出现在补全里，也无法执行
         return invocation.source().hasPermission(PERMISSION);

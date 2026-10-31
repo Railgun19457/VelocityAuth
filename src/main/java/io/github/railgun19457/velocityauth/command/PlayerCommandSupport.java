@@ -89,52 +89,6 @@ public abstract class PlayerCommandSupport implements SimpleCommand {
                 && registry.get(player).map(AuthSession::authenticated).orElse(false);
     }
 
-    /** 内置渠道（当插件上下文不可用时作为补全兜底）。 */
-    private static final java.util.List<String> DEFAULT_CHANNELS = java.util.List.of("email", "qq");
-
-    /**
-     * 在指定参数位补全已配置的绑定渠道 id（email / 各社交渠道）。
-     * <p>
-     * 注意：Velocity 的 {@code SimpleCommand.Invocation#arguments()} 在玩家已经打出参数内容时
-     * 会返回空数组（而不是 {@code ["已输入内容"]}），因此不能用 {@code args.length == index + 1}
-     * 精确判断位置。这里改为：
-     * <ul>
-     *   <li>参数数不足该位 → 该位尚未输入，给全集</li>
-     *   <li>参数数恰好到该位 → 按已输入内容做前缀过滤</li>
-     *   <li>参数数超过该位 → 该位已填完，不再补全</li>
-     * </ul>
-     * 这样 {@code /bind <Tab>}、{@code /bind e<Tab>} 都能正常出候选。
-     *
-     * @param index     该渠道参数从 0 开始的位置
-     * @param maxParams 该命令的最大参数个数（含渠道位之后的参数），用于区分
-     *                  「{@code args} 为空」时玩家是否已经走过前面的参数位
-     */
-    protected java.util.List<String> suggestBindingChannel(Invocation invocation, int index, int maxParams) {
-        String[] args = invocation.arguments();
-        if (args.length > index + 1) {
-            return java.util.List.of();
-        }
-        // 参数数不足该位（含 args 为空）：该位尚未到达。
-        // 只有渠道位是第一个参数时才给全集；否则无法判断玩家是否已经输入过前面的参数。
-        if (args.length < index + 1) {
-            return index == 0 ? channelIds("") : java.util.List.of();
-        }
-        String prefix = args[index] == null ? "" : args[index].toLowerCase(java.util.Locale.ROOT);
-        return channelIds(prefix);
-    }
-
-    private java.util.List<String> channelIds(String prefix) {
-        java.util.List<String> ids = plugin == null
-                ? DEFAULT_CHANNELS
-                : io.github.railgun19457.velocityauth.auth.Provider.ids(plugin.config());
-        return ids.stream().filter(value -> value.startsWith(prefix)).toList();
-    }
-
-    /** 单参数命令（{@code /bind}、{@code /unbind}）的渠道补全。 */
-    protected java.util.List<String> suggestBindingChannel(Invocation invocation, int index) {
-        return suggestBindingChannel(invocation, index, index + 1);
-    }
-
     /**
      * 提示玩家完成「注册后必须绑定」的渠道（多选一）。
      * <p>

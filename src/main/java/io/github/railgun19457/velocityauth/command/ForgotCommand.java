@@ -72,12 +72,6 @@ public final class ForgotCommand extends PlayerCommandSupport {
     }
 
     @Override
-    public List<String> suggest(Invocation invocation) {
-        // /forgot <账号> [渠道]：渠道是第 2 个参数，maxParams=2
-        return suggestBindingChannel(invocation, 1, 2);
-    }
-
-    @Override
     public boolean hasPermission(Invocation invocation) {
         return availableWhenUnauthenticated(invocation);
     }

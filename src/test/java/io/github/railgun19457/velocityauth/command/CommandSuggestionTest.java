@@ -1,7 +1,9 @@
 package io.github.railgun19457.velocityauth.command;
 
+import com.mojang.brigadier.suggestion.Suggestion;
+import com.mojang.brigadier.suggestion.Suggestions;
+import com.mojang.brigadier.suggestion.SuggestionsBuilder;
 import com.velocitypowered.api.command.CommandSource;
-import com.velocitypowered.api.command.SimpleCommand;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
 
@@ -10,70 +12,53 @@ import java.util.List;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
 /**
- * 命令参数补全：{@code email} / {@code qq} 两个渠道值。
+ * Brigadier 补全提供器的前缀过滤行为。
  * <p>
- * 只依赖 {@code Invocation#arguments()}，因此直接用假 Invocation 驱动（不启动代理）。
+ * 重构前这些断言挂在各命令的 {@code SimpleCommand#suggest} 上；改成 Brigadier 后，
+ * 过滤逻辑统一收敛到 {@link CommandTree#adapt}。
  */
 @Timeout(30)
 class CommandSuggestionTest {
 
-    private static SimpleCommand.Invocation invocation(String... args) {
-        return new SimpleCommand.Invocation() {
-            @Override
-            public CommandSource source() {
-                return null;
-            }
-
-            @Override
-            public String[] arguments() {
-                return args;
-            }
-
-            @Override
-            public String alias() {
-                return "test";
-            }
-        };
+    private static List<String> suggest(List<String> candidates, String input) throws Exception {
+        SuggestionsBuilder builder = new SuggestionsBuilder(input, 0);
+        Suggestions result = CommandTree.adapt((CommandSource) -> candidates)
+                .getSuggestions(null, builder)
+                .join();
+        return result.getList().stream().map(Suggestion::getText).toList();
     }
 
     @Test
-    void forgotSuggestsChannelAtSecondArgument() {
-        ForgotCommand command = new ForgotCommand(null, null);
-
-        assertEquals(List.of("email", "qq"), command.suggest(invocation("Carol", "")));
-        assertEquals(List.of("email"), command.suggest(invocation("Carol", "e")));
-        assertEquals(List.of("email"), command.suggest(invocation("Carol", "EMAIL")));
-        assertEquals(List.of("qq"), command.suggest(invocation("Carol", "q")));
-        assertEquals(List.of(), command.suggest(invocation("Carol", "x")));
-        // 第一个参数是账号名：不补全（避免暴露哪些账号存在）
-        assertEquals(List.of(), command.suggest(invocation("")));
-        // 参数已填完
-        assertEquals(List.of(), command.suggest(invocation("Carol", "email", "")));
-    }
-
-    /**
-     * Velocity 在玩家已打出内容时会传空数组，此时该位尚未确定，应给出全集而不是空。
-     * 这修的是「必须先输入首字母才出补全」的问题。
-     */
-    @Test
-    void emptyArgumentsStillSuggestCandidates() {
-        BindCommand bind = new BindCommand(null, null);
-        UnbindCommand unbind = new UnbindCommand(null, null);
-
-        // args 为空数组 = 玩家已开始输入但 Velocity 未回传内容
-        assertEquals(List.of("email", "qq"), bind.suggest(invocation()));
-        assertEquals(List.of("email", "qq"), unbind.suggest(invocation()));
+    void emptyInputListsAllCandidates() throws Exception {
+        assertEquals(List.of("email", "qq"), suggest(List.of("email", "qq"), ""));
     }
 
     @Test
-    void bindAndUnbindSuggestChannelAtFirstArgument() {
-        BindCommand bind = new BindCommand(null, null);
-        UnbindCommand unbind = new UnbindCommand(null, null);
+    void prefixFiltersCandidates() throws Exception {
+        assertEquals(List.of("email"), suggest(List.of("email", "qq"), "e"));
+        assertEquals(List.of("qq"), suggest(List.of("email", "qq"), "q"));
+        assertEquals(List.of(), suggest(List.of("email", "qq"), "x"));
+    }
 
-        for (SimpleCommand command : List.of(bind, unbind)) {
-            assertEquals(List.of("email", "qq"), command.suggest(invocation("")));
-            assertEquals(List.of("qq"), command.suggest(invocation("q")));
-            assertEquals(List.of(), command.suggest(invocation("email", "")));
-        }
+    @Test
+    void prefixIsCaseInsensitive() throws Exception {
+        assertEquals(List.of("email"), suggest(List.of("email", "qq"), "E"));
+        assertEquals(List.of("email"), suggest(List.of("email", "qq"), "EMAIL"));
+    }
+
+    @Test
+    void failingProviderYieldsEmptyRatherThanError() throws Exception {
+        SuggestionsBuilder builder = new SuggestionsBuilder("", 0);
+        Suggestions result = CommandTree.adapt(ctx -> {
+            throw new IllegalStateException("boom");
+        }).getSuggestions(null, builder).join();
+        assertEquals(List.of(), result.getList());
+    }
+
+    @Test
+    void nullProviderResultYieldsEmpty() throws Exception {
+        SuggestionsBuilder builder = new SuggestionsBuilder("", 0);
+        Suggestions result = CommandTree.adapt(ctx -> null).getSuggestions(null, builder).join();
+        assertEquals(List.of(), result.getList());
     }
 }

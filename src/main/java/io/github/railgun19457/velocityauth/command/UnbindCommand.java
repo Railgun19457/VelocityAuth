@@ -91,12 +91,6 @@ public final class UnbindCommand extends PlayerCommandSupport {
     }
 
     @Override
-    public java.util.List<String> suggest(Invocation invocation) {
-        // /unbind <渠道>
-        return suggestBindingChannel(invocation, 0);
-    }
-
-    @Override
     public boolean hasPermission(Invocation invocation) {
         return availableWhenAuthenticated(invocation);
     }

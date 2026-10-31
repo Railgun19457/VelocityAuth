@@ -224,12 +224,6 @@ public final class BindCommand extends PlayerCommandSupport {
     }
 
     @Override
-    public java.util.List<String> suggest(Invocation invocation) {
-        // /bind <渠道> [值]
-        return suggestBindingChannel(invocation, 0);
-    }
-
-    @Override
     public boolean hasPermission(Invocation invocation) {
         return invocation.source() instanceof Player;
     }
