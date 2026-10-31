@@ -94,8 +94,11 @@ public final class CommandRegistrar {
     /** 注册一个只有位置参数的命令。 */
     private void register(CommandManager manager, String name, PlayerCommandSupport command,
                           CommandTree.Arg... args) {
-        // 只保留与状态无关的条件（必须是玩家）；登录态由 CommandGuardListener 运行时拦截
-        Predicate<CommandSource> require = source -> source instanceof Player;
+        // requires 会在「为每个玩家构建可用命令树」时求值，因此可以用来按登录状态隐藏命令：
+        // 未登录玩家看不到 /logout、/changepassword 等，登录后看不到 /login、/register。
+        // 执行阶段的兜底仍由 CommandGuardListener 负责。
+        Predicate<CommandSource> require = source -> command.hasPermission(
+                new SimpleCommandAdapter.FixedInvocation(source, new String[0], name));
         LiteralArgumentBuilder<CommandSource> tree = CommandTree.positional(name, require,
                 (source, values) -> SimpleCommandAdapter.run(command, name, source, values), args);
         CommandMeta meta = manager.metaBuilder(name).plugin(plugin).build();
