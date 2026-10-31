@@ -1,4 +1,4 @@
-# version: 1
+# version: 3
 # ============ VelocityAuth 中文语言文件 ============
 # 文本使用 MiniMessage 语法；{xxx} 为占位符。
 prefix: "<gold>[认证]</gold> "
@@ -163,7 +163,7 @@ admin:
     not-found: "<red>账号不存在：{account}</red>"
     info-header: "<gold>===== 账号 {account} ====="
     info-id: "<gray>ID：</gray><white>{value}</white>"
-    info-uuid: "<gray>UUID：</gray><white>{value}</white>"
+    info-uuid: "<gray>UUID：</gray><click:copy_to_clipboard:'{value}'><hover:show_text:'<gray>点击复制 UUID</gray>'><white>{value}</white></hover></click>"
     info-status: "<gray>状态：</gray><white>{value}</white>"
     info-bindings: "<gray>绑定：</gray><white>{value}</white>"
     info-last-server: "<gray>上次子服：</gray><white>{value}</white>"
@@ -186,18 +186,18 @@ admin:
     empty: "<gray>（无）</gray>"
     kicked: "<green>已踢出账号 {account} 的 {count} 个会话。</green>"
   pair:
-    created: "<green>已生成配对码，请配置到 bot 侧：</green>"
-    created-id: "<gray>pairing_id：</gray><white>{id}</white>"
-    created-code: "<gray>code：</gray><white>{code}</white>"
+    created: "<green>已生成配对码，点一下即可复制，然后配置到 bot 侧：</green>"
+    created-id: "<gray>pairing_id：</gray><click:copy_to_clipboard:'{id}'><hover:show_text:'<gray>点击复制 pairing_id</gray>'><white>{id}</white></hover></click>"
+    created-code: "<gray>code：</gray><click:copy_to_clipboard:'{code}'><hover:show_text:'<gray>点击复制配对码</gray>'><white>{code}</white></hover></click>"
     created-ttl: "<gray>有效期：</gray><white>{ttl} 秒</white>"
     list-header: "<gold>===== 待配对记录 ====="
-    list-entry: "<gray>- </gray><white>{id}</white><gray> 剩余 </gray><white>{ttl}</white><gray> 秒，尝试 </gray><white>{attempts}</white>"
+    list-entry: "<gray>- </gray><click:copy_to_clipboard:'{id}'><hover:show_text:'<gray>点击复制 pairing_id</gray>'><white>{id}</white></hover></click><gray> 剩余 </gray><white>{ttl}</white><gray> 秒，尝试 </gray><white>{attempts}</white>"
     empty: "<gray>（无）</gray>"
     revoked: "<green>已撤销配对 {id}。</green>"
     not-found: "<red>配对记录不存在：{id}</red>"
   client:
     list-header: "<gold>===== 已配对 bot 客户端 ====="
-    list-entry: "<gray>- </gray><white>{id}</white><gray> 指纹 </gray><white>{fingerprint}</white><gray> 最近 </gray><white>{last_seen}</white>"
+    list-entry: "<gray>- </gray><click:copy_to_clipboard:'{id}'><hover:show_text:'<gray>点击复制 client_id</gray>'><white>{id}</white></hover></click><gray> 指纹 </gray><click:copy_to_clipboard:'{fingerprint}'><hover:show_text:'<gray>点击复制指纹</gray>'><white>{fingerprint}</white></hover></click><gray> 最近 </gray><white>{last_seen}</white>"
     empty: "<gray>（无）</gray>"
     revoked: "<green>已撤销客户端 {id}。</green>"
     not-found: "<red>客户端不存在：{id}</red>"

@@ -93,6 +93,32 @@ class LangResourceTest {
                 ClickEvent.Action.COPY_TO_CLIPBOARD, copies);
         assertEquals(Set.of("AbC123"), copies);
 
+        // /vauth pair new 输出的 pairing_id 与配对码都要能点击复制（长串手打太痛苦）
+        Set<String> pairCopies = new LinkedHashSet<>();
+        collectClicks(zh.msg("admin.pair.created-id", "id", "pair_0123456789abcdef"),
+                ClickEvent.Action.COPY_TO_CLIPBOARD, pairCopies);
+        collectClicks(zh.msg("admin.pair.created-code", "code", "AbC-dEf_1234567890123456789012"),
+                ClickEvent.Action.COPY_TO_CLIPBOARD, pairCopies);
+        assertEquals(Set.of("pair_0123456789abcdef", "AbC-dEf_1234567890123456789012"), pairCopies,
+                "配对信息缺少点击复制：" + pairCopies);
+
+        // 列表类输出里的长标识（pairing_id / client_id / 指纹）同样要能点一下复制
+        Set<String> listCopies = new LinkedHashSet<>();
+        collectClicks(zh.msg("admin.pair.list-entry", "id", "pair_0123456789abcdef", "ttl", 600, "attempts", "0/5"),
+                ClickEvent.Action.COPY_TO_CLIPBOARD, listCopies);
+        collectClicks(zh.msg("admin.client.list-entry", "id", "node-bot-1",
+                        "fingerprint", "r6dpmtwD_cwfGaktUYh4iYTx8T3bfMcEOMKlPvH3JEo", "last_seen", "-"),
+                ClickEvent.Action.COPY_TO_CLIPBOARD, listCopies);
+        assertEquals(Set.of("pair_0123456789abcdef", "node-bot-1",
+                        "r6dpmtwD_cwfGaktUYh4iYTx8T3bfMcEOMKlPvH3JEo"), listCopies,
+                "列表输出缺少点击复制：" + listCopies);
+
+        // 账号 UUID 也是手打不出来的长串
+        Set<String> uuidCopies = new LinkedHashSet<>();
+        collectClicks(zh.msg("admin.account.info-uuid", "value", "aa2a593e-2c20-3794-860e-8db793863d7d"),
+                ClickEvent.Action.COPY_TO_CLIPBOARD, uuidCopies);
+        assertEquals(Set.of("aa2a593e-2c20-3794-860e-8db793863d7d"), uuidCopies, "UUID 缺少点击复制");
+
         // 纯文本里不应残留未解析的标签（序列化回 MiniMessage 当然会带 <click>，所以看纯文本）
         String plain = PlainTextComponentSerializer.plainText().serialize(zh.msg("routing.joining-login"));
         assertFalse(plain.contains("click:"), plain);

@@ -1,4 +1,4 @@
-# version: 1
+# version: 3
 # ============ VelocityAuth English language file ============
 # Text uses MiniMessage syntax; {xxx} are placeholders.
 prefix: "<gold>[Auth]</gold> "
@@ -163,7 +163,7 @@ admin:
     not-found: "<red>Account not found: {account}</red>"
     info-header: "<gold>===== Account {account} ====="
     info-id: "<gray>ID: </gray><white>{value}</white>"
-    info-uuid: "<gray>UUID: </gray><white>{value}</white>"
+    info-uuid: "<gray>UUID: </gray><click:copy_to_clipboard:'{value}'><hover:show_text:'<gray>Click to copy UUID</gray>'><white>{value}</white></hover></click>"
     info-status: "<gray>Status: </gray><white>{value}</white>"
     info-bindings: "<gray>Bindings: </gray><white>{value}</white>"
     info-last-server: "<gray>Last server: </gray><white>{value}</white>"
@@ -186,18 +186,18 @@ admin:
     empty: "<gray>(none)</gray>"
     kicked: "<green>Kicked {count} session(s) of {account}.</green>"
   pair:
-    created: "<green>Pairing code generated, configure it on the bot side:</green>"
-    created-id: "<gray>pairing_id: </gray><white>{id}</white>"
-    created-code: "<gray>code: </gray><white>{code}</white>"
+    created: "<green>Pairing code generated, click to copy, then configure it on the bot side:</green>"
+    created-id: "<gray>pairing_id: </gray><click:copy_to_clipboard:'{id}'><hover:show_text:'<gray>Click to copy pairing_id</gray>'><white>{id}</white></hover></click>"
+    created-code: "<gray>code: </gray><click:copy_to_clipboard:'{code}'><hover:show_text:'<gray>Click to copy pairing code</gray>'><white>{code}</white></hover></click>"
     created-ttl: "<gray>TTL: </gray><white>{ttl} seconds</white>"
     list-header: "<gold>===== Pending pairings ====="
-    list-entry: "<gray>- </gray><white>{id}</white><gray> ttl </gray><white>{ttl}</white><gray>s, attempts </gray><white>{attempts}</white>"
+    list-entry: "<gray>- </gray><click:copy_to_clipboard:'{id}'><hover:show_text:'<gray>Click to copy pairing_id</gray>'><white>{id}</white></hover></click><gray> ttl </gray><white>{ttl}</white><gray>s, attempts </gray><white>{attempts}</white>"
     empty: "<gray>(none)</gray>"
     revoked: "<green>Pairing {id} revoked.</green>"
     not-found: "<red>Pairing not found: {id}</red>"
   client:
     list-header: "<gold>===== Paired bot clients ====="
-    list-entry: "<gray>- </gray><white>{id}</white><gray> fingerprint </gray><white>{fingerprint}</white><gray> last seen </gray><white>{last_seen}</white>"
+    list-entry: "<gray>- </gray><click:copy_to_clipboard:'{id}'><hover:show_text:'<gray>Click to copy client_id</gray>'><white>{id}</white></hover></click><gray> fingerprint </gray><click:copy_to_clipboard:'{fingerprint}'><hover:show_text:'<gray>Click to copy fingerprint</gray>'><white>{fingerprint}</white></hover></click><gray> last seen </gray><white>{last_seen}</white>"
     empty: "<gray>(none)</gray>"
     revoked: "<green>Client {id} revoked.</green>"
     not-found: "<red>Client not found: {id}</red>"
