@@ -68,6 +68,16 @@ public final class PlayerLifecycleListener {
         if (session == null || session.authenticated()) {
             return;
         }
+        // 已知该连接对应的账号时，把 [登录] 按钮预填成 /login <账号> ，玩家只需打密码
+        var identity = plugin.identities().resolve(player.getUniqueId(), player.getUsername());
+        var linked = plugin.authService().cache().byIdentity(identity.kind(), identity.identifier());
+        if (linked.isPresent()) {
+            String account = linked.get().name();
+            player.sendMessage(plugin.lang().msg("routing.joining-login-known", "account", account));
+            player.sendMessage(plugin.lang().msg("routing.joining-login-usage-login-known", "account", account));
+            player.sendMessage(plugin.lang().msg("routing.joining-login-usage-forgot"));
+            return;
+        }
         // 一行是 [登录]/[注册]/[忘记密码] 按钮（点击填充指令），随后三行分别是用法
         player.sendMessage(plugin.lang().msg("routing.joining-login"));
         player.sendMessage(plugin.lang().msg("routing.joining-login-usage-login"));

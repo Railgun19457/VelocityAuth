@@ -1,4 +1,4 @@
-# version: 4
+# version: 5
 # ============ VelocityAuth English language file ============
 # Text uses MiniMessage syntax; {xxx} are placeholders.
 prefix: "<gold>[Auth]</gold> "
@@ -134,7 +134,9 @@ auth:
 
 routing:
   joining-login: "<yellow>Please log in or register:</yellow> <click:suggest_command:'/login '><hover:show_text:'<gray>Click to fill: /login [account] [password]</gray>'><gold><bold>[Login]</bold></gold></hover></click> <click:suggest_command:'/register '><hover:show_text:'<gray>Click to fill: /register [account] [password] [confirm password]</gray>'><green><bold>[Register]</bold></green></hover></click> <click:suggest_command:'/forgot '><hover:show_text:'<gray>Click to fill: /forgot [account] [channel]</gray>'><aqua><bold>[Forgot password]</bold></aqua></hover></click>"
+  joining-login-known: "<yellow>Welcome back {account}, please log in:</yellow> <click:suggest_command:'/login {account} '><hover:show_text:'<gray>Click to fill: /login {account} [password]</gray>'><gold><bold>[Login]</bold></gold></hover></click> <click:suggest_command:'/forgot '><hover:show_text:'<gray>Click to fill: /forgot [account] [channel]</gray>'><aqua><bold>[Forgot password]</bold></aqua></hover></click>"
   joining-login-usage-login: "<gray>Login: </gray><white>/login <account> <password></white>"
+  joining-login-usage-login-known: "<gray>Login: </gray><white>/login {account} <password></white>"
   joining-login-usage-register: "<gray>Register: </gray><white>/register <account> <password> <confirm password></white>"
   joining-login-usage-forgot: "<gray>Forgot password: </gray><white>/forgot <account> <channel></white>"
   joining-default: "<gray>Entering {server}…</gray>"

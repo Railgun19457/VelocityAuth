@@ -1,4 +1,4 @@
-# version: 4
+# version: 5
 # ============ VelocityAuth 中文语言文件 ============
 # 文本使用 MiniMessage 语法；{xxx} 为占位符。
 prefix: "<gold>[认证]</gold> "
@@ -134,7 +134,9 @@ auth:
 
 routing:
   joining-login: "<yellow>请先登录或注册：</yellow> <click:suggest_command:'/login '><hover:show_text:'<gray>点击填充：/login 【账号】 【密码】</gray>'><gold><bold>[登录]</bold></gold></hover></click> <click:suggest_command:'/register '><hover:show_text:'<gray>点击填充：/register 【账号】 【密码】 【确认密码】</gray>'><green><bold>[注册]</bold></green></hover></click> <click:suggest_command:'/forgot '><hover:show_text:'<gray>点击填充：/forgot 【账号】 【渠道】</gray>'><aqua><bold>[忘记密码]</bold></aqua></hover></click>"
+  joining-login-known: "<yellow>欢迎回来 {account}，请登录：</yellow> <click:suggest_command:'/login {account} '><hover:show_text:'<gray>点击填充：/login {account} 【密码】</gray>'><gold><bold>[登录]</bold></gold></hover></click> <click:suggest_command:'/forgot '><hover:show_text:'<gray>点击填充：/forgot 【账号】 【渠道】</gray>'><aqua><bold>[忘记密码]</bold></aqua></hover></click>"
   joining-login-usage-login: "<gray>登录：</gray><white>/login <账号> <密码></white>"
+  joining-login-usage-login-known: "<gray>登录：</gray><white>/login {account} <密码></white>"
   joining-login-usage-register: "<gray>注册：</gray><white>/register <账号> <密码> <确认密码></white>"
   joining-login-usage-forgot: "<gray>忘记密码：</gray><white>/forgot <账号> <渠道></white>"
   joining-default: "<gray>正在进入 {server}…</gray>"

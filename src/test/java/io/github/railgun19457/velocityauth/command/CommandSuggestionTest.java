@@ -51,6 +51,20 @@ class CommandSuggestionTest {
         assertEquals(List.of(), command.suggest(invocation("Carol", "email", "")));
     }
 
+    /**
+     * Velocity 在玩家已打出内容时会传空数组，此时该位尚未确定，应给出全集而不是空。
+     * 这修的是「必须先输入首字母才出补全」的问题。
+     */
+    @Test
+    void emptyArgumentsStillSuggestCandidates() {
+        BindCommand bind = new BindCommand(null, null);
+        UnbindCommand unbind = new UnbindCommand(null, null);
+
+        // args 为空数组 = 玩家已开始输入但 Velocity 未回传内容
+        assertEquals(List.of("email", "qq"), bind.suggest(invocation()));
+        assertEquals(List.of("email", "qq"), unbind.suggest(invocation()));
+    }
+
     @Test
     void bindAndUnbindSuggestChannelAtFirstArgument() {
         BindCommand bind = new BindCommand(null, null);

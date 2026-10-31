@@ -119,6 +119,18 @@ class LangResourceTest {
                 ClickEvent.Action.COPY_TO_CLIPBOARD, uuidCopies);
         assertEquals(Set.of("aa2a593e-2c20-3794-860e-8db793863d7d"), uuidCopies, "UUID 缺少点击复制");
 
+        // 已知账号时，[登录] 按钮要预填 /login <账号> ，玩家只需补密码
+        Set<String> knownSuggests = new LinkedHashSet<>();
+        collectClicks(zh.msg("routing.joining-login-known", "account", "Alice"),
+                ClickEvent.Action.SUGGEST_COMMAND, knownSuggests);
+        assertTrue(knownSuggests.contains("/login Alice "), "缺少预填账号的登录按钮：" + knownSuggests);
+        assertEquals(Set.of("/login Alice ", "/forgot "), knownSuggests, "多余/缺失的按钮：" + knownSuggests);
+        // 纯文本里不能残留未替换的占位符
+        String knownPlain = PlainTextComponentSerializer.plainText()
+                .serialize(zh.msg("routing.joining-login-known", "account", "Alice"));
+        assertFalse(knownPlain.contains("{account}"), knownPlain);
+        assertTrue(knownPlain.contains("Alice"), knownPlain);
+
         // 纯文本里不应残留未解析的标签（序列化回 MiniMessage 当然会带 <click>，所以看纯文本）
         String plain = PlainTextComponentSerializer.plainText().serialize(zh.msg("routing.joining-login"));
         assertFalse(plain.contains("click:"), plain);
