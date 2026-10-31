@@ -99,6 +99,35 @@ shadowJar {
     // 一旦改写包名，multipart 邮件（HTML + 纯文本）就会报
     // "no object DCH for MIME type multipart/alternative"。
     // Velocity 为每个插件使用独立 ClassLoader，本就不需要靠 relocate 避免冲突。
+
+    // ---------- 裁剪 sqlite-jdbc 的本地库 ----------
+    // sqlite-jdbc 把所有平台的 .so/.dll/.dylib 都打进同一个 jar（24 个平台 ≈ 13 MB），
+    // 而一台服务器运行时只会用到其中一个。这里只保留主流平台，体积可减少约 10 MB。
+    //
+    // 需要其它平台（FreeBSD / Android / ARMv6 / ppc64 / riscv64）时，用
+    //   ./gradlew build -PsqlitePlatforms=all
+    // 构建完整版；或用逗号分隔指定，例如 -PsqlitePlatforms=Windows/x86_64,Linux/x86_64
+    def sqlitePlatforms = (providers.gradleProperty('sqlitePlatforms').getOrElse('default')).trim()
+    // 显式声明为任务输入，否则 build cache 会复用未裁剪的旧产物
+    inputs.property('sqlitePlatforms', sqlitePlatforms)
+    if (!sqlitePlatforms.equalsIgnoreCase('all')) {
+        def keep = sqlitePlatforms.equalsIgnoreCase('default')
+                ? ['Windows/x86_64', 'Linux/x86_64', 'Linux/aarch64', 'Mac/x86_64', 'Mac/aarch64']
+                : sqlitePlatforms.split(',').collect { it.trim() }
+        logger.lifecycle("[shadowJar] sqlite 本地库仅保留：${keep.join(', ')}（-PsqlitePlatforms=all 可构建全平台版）")
+        exclude { entry ->
+            String path = entry.path
+            if (!path.startsWith('org/sqlite/native/')) {
+                return false
+            }
+            def parts = path.split('/')
+            // org/sqlite/native/<os>/<arch>/<file>  →  parts[3]/parts[4]
+            if (parts.length < 6) {
+                return false   // 目录条目保留，避免影响遍历
+            }
+            return !keep.contains("${parts[3]}/${parts[4]}".toString())
+        }
+    }
 }
 
 build.dependsOn shadowJar
