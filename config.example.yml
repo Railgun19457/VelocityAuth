@@ -38,11 +38,6 @@ auth:
     enabled: false                   # 会话保持：同 IP 免密登录。默认关闭（国内 NAT 共享 IP 风险高）
     ttl-minutes: 30                  # 会话有效期
     bind-to-ip: true                 # 是否绑定 IP（关闭则换 IP 也能免密，风险更高）
-  premium:
-    enabled: true                    # 是否启用正版分支
-    keep-real-uuid: true             # true=正版保留真实 Mojang UUID；false=重写为账号 UUID
-    require-password: true           # 正版玩家是否仍需 /login（false 则按名字直接免密进入）
-    name-conflict: first-come        # 正版名与已有账号名冲突时：first-come | premium-priority
   bedrock:
     auto-link: true                  # 基岩玩家认证成功后自动关联 Floodgate 身份
                                      #（需 Floodgate 端启用 player-link；否则回退为改写 UUID）

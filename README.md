@@ -18,7 +18,7 @@
 - 验证码统一走一次性会话（TTL、限次、限流），邮件与提示带**操作名称**区分场景
 - 未认证隔离：路由到登录服 + 拦截命令 + 兜底拦跳服；命令的**补全与可见性**按登录状态与权限过滤
 - 记忆上次所在子服；可选会话保持（同 IP 免密，默认关闭）
-- 正版分支：默认仍需 `/login`，可配置保留真实 Mojang UUID
+- 正版与离线连接一视同仁：一律走账号认证，身份统一重写为账号的 `name` + `uuid`
 - 完整管理命令（状态、账号管理、踢会话、顶号、审计日志）
 - MiniMessage 文案（中英双语）+ 点击事件：`[登录]`/`[注册]`/`[忘记密码]` 一键填充、社交验证码点击复制
 - SQLite（默认）/ MySQL
@@ -118,7 +118,7 @@ accepts-transfers = true
 - `language`：`zh_cn` / `en_us`
 - `database`：`sqlite`（默认）或 `mysql`；`login-history-days` / `audit-log-days` / `binding-history-days` 三张历史表的保留天数（0=永久）
 - `servers`：`login` 登录服、`default` 认证后默认服、`allowed` 允许进入的子服、`remember-last`
-- `auth`：账号名 / 密码规则、`bcrypt-cost`、会话保持 `session`、正版 `premium`、基岩 `bedrock`
+- `auth`：账号名 / 密码规则、`bcrypt-cost`、会话保持 `session`、基岩 `bedrock`
 - `registration`：`require-binding`（注册后必须绑定的渠道）、`unbound-ttl-minutes`
 - `binding`：`email`（基数、域名白/黑名单、冷却）+ `social`（任意社交渠道，各自基数/冷却/码长）；`cooldown-minutes` 解绑/注销后的再绑定冷却
 - `verification`：码长、有效期、尝试次数、限流
@@ -136,7 +136,7 @@ accepts-transfers = true
 - 社交渠道的验证码**只能在对应房间发**：游戏内 `/verify` 对社交会话无效，否则公开房间里的码可被任何人用来冒用
 - 邮箱域名按 `@` 之后**精确匹配**（不做子域名后缀匹配，避免 `mail.qq.com` 绕过白名单）
 - 会话保持默认关闭：国内 NAT 共享 IP 普遍，同 IP 免密有被他人利用的风险
-- 正版名冲突默认先来先得：名称一旦被注册，其他人（含正版玩家）无法再用
+- 账号名先来先得：名称一旦被注册，其他人无法再用
 - `/vauth reload` 不重建 bot 通道：改动 `bot.*` 需重启代理
 - 释放出来的 `config.yml` / `lang/*.yml` / `email.yml` 带 `# version: N` 标记。升级时：语言文件与邮件模板会在**备份原文件后**自动升级；`config.yml` 因含凭据**不会自动覆盖**，只会写出 `config.yml.new` 供比对。你改过但没有版本标记的文件也只会得到 `.new`
 - **不要提交**：`config.yml`（含 SMTP 授权码、数据库密码）、`keys/`（私钥）、`*.db`（玩家数据）

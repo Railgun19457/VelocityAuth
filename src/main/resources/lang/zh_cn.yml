@@ -1,4 +1,4 @@
-# version: 3
+# version: 4
 # ============ VelocityAuth 中文语言文件 ============
 # 文本使用 MiniMessage 语法；{xxx} 为占位符。
 prefix: "<gold>[认证]</gold> "
@@ -128,7 +128,6 @@ auth:
   session-restored: "<green>已通过会话保持自动登录。</green>"
   authenticated: "<green>身份验证通过。</green>"
   account-locked: "<red>该账号已被锁定。</red>"
-  name-occupied: "<red>名称 {name} 已被占用，无法使用。</red>"
   reconnect-required: "<yellow>请重新连接。</yellow>"
   logout-disconnect: "<yellow>已退出登录，请重新连接。</yellow>"
   login-disconnect: "<green>登录成功，请重新连接。</green>"

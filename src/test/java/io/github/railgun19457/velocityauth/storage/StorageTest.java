@@ -53,7 +53,7 @@ class StorageTest {
     @Test
     void accountCrudRoundTrip() {
         UUID uuid = UUID.nameUUIDFromBytes("OfflinePlayer:test1".getBytes(java.nio.charset.StandardCharsets.UTF_8));
-        long id = storage.accounts().insert("Test1", "test1", uuid, "$2a$10$hash", AccountStatus.ACTIVE, null, 1000L);
+        long id = storage.accounts().insert("Test1", "test1", uuid, "$2a$10$hash", AccountStatus.ACTIVE, 1000L);
 
         assertTrue(storage.accounts().existsByNameLower("test1"));
         Account loaded = storage.accounts().findById(id).orElseThrow();
@@ -81,7 +81,7 @@ class StorageTest {
     @Test
     void identityUpsertIsIdempotent() {
         long accountId = storage.accounts().insert("Alice", "alice", UUID.randomUUID(), "h", AccountStatus.ACTIVE,
-                null, 1L);
+                1L);
         storage.identities().upsert(accountId, IdentityKind.JAVA, "alice", 10L);
         storage.identities().upsert(accountId, IdentityKind.JAVA, "alice", 20L);
 
@@ -94,8 +94,8 @@ class StorageTest {
 
     @Test
     void bindingsEnforceUniquenessAndCounting() {
-        long a = storage.accounts().insert("A", "a", UUID.randomUUID(), "h", AccountStatus.ACTIVE, null, 1L);
-        long b = storage.accounts().insert("B", "b", UUID.randomUUID(), "h", AccountStatus.ACTIVE, null, 1L);
+        long a = storage.accounts().insert("A", "a", UUID.randomUUID(), "h", AccountStatus.ACTIVE, 1L);
+        long b = storage.accounts().insert("B", "b", UUID.randomUUID(), "h", AccountStatus.ACTIVE, 1L);
 
         storage.bindings().insert(a, "email", "a@qq.com", 1L, 1L);
         storage.bindings().insert(b, "email", "a@qq.com", 1L, 1L);
@@ -112,7 +112,7 @@ class StorageTest {
 
     @Test
     void cascadeDeleteRemovesChildren() {
-        long accountId = storage.accounts().insert("C", "c", UUID.randomUUID(), "h", AccountStatus.ACTIVE, null, 1L);
+        long accountId = storage.accounts().insert("C", "c", UUID.randomUUID(), "h", AccountStatus.ACTIVE, 1L);
         storage.identities().upsert(accountId, IdentityKind.JAVA, "c", 1L);
         storage.bindings().insert(accountId, "qq", "10002", 1L, 1L);
         storage.sessions().insert(accountId, "10.0.0.1", 1L, 100L);
@@ -126,7 +126,7 @@ class StorageTest {
 
     @Test
     void sessionsRespectExpiry() {
-        long accountId = storage.accounts().insert("D", "d", UUID.randomUUID(), "h", AccountStatus.ACTIVE, null, 1L);
+        long accountId = storage.accounts().insert("D", "d", UUID.randomUUID(), "h", AccountStatus.ACTIVE, 1L);
         storage.sessions().insert(accountId, "10.0.0.2", 100L, 200L);
 
         assertTrue(storage.sessions().findValid(accountId, "10.0.0.2", 150L).isPresent());
@@ -138,7 +138,7 @@ class StorageTest {
 
     @Test
     void auditLogRecordsEntries() {
-        long accountId = storage.accounts().insert("E", "e", UUID.randomUUID(), "h", AccountStatus.ACTIVE, null, 1L);
+        long accountId = storage.accounts().insert("E", "e", UUID.randomUUID(), "h", AccountStatus.ACTIVE, 1L);
         storage.audit().log(100L, accountId, "login", "127.0.0.1", "ok");
         storage.audit().log(101L, null, "login_failed", "127.0.0.1", "bad password");
 
@@ -149,7 +149,7 @@ class StorageTest {
 
     @Test
     void loginHistoryRecordsFiltersAndPrunes() {
-        long accountId = storage.accounts().insert("H", "h", UUID.randomUUID(), "h", AccountStatus.ACTIVE, null, 1L);
+        long accountId = storage.accounts().insert("H", "h", UUID.randomUUID(), "h", AccountStatus.ACTIVE, 1L);
         storage.loginHistory().insert(accountId, 100L, "1.2.3.4", LoginHistory.SUCCESS, "h", null);
         storage.loginHistory().insert(accountId, 200L, "1.2.3.4", LoginHistory.FAILED, "h", "reason=wrong_password");
         storage.loginHistory().insert(null, 210L, "5.6.7.8", LoginHistory.FAILED, "ghost", "reason=not_found");
@@ -172,7 +172,7 @@ class StorageTest {
     @Test
     void bindingHistoryPersistsAfterAccountDeletion() {
         long accountId = storage.accounts().insert("BH", "bh", UUID.randomUUID(), "h",
-                AccountStatus.ACTIVE, null, 1L);
+                AccountStatus.ACTIVE, 1L);
         storage.bindingHistory().insert(accountId, "email", "bh@qq.com",
                 BindingHistory.BIND, 100L, "1.1.1.1");
         storage.bindingHistory().insert(accountId, "email", "bh@qq.com",
@@ -190,7 +190,7 @@ class StorageTest {
     @Test
     void historyTablesPruneByCutoff() {
         long accountId = storage.accounts().insert("P", "p", UUID.randomUUID(), "h",
-                AccountStatus.ACTIVE, null, 1L);
+                AccountStatus.ACTIVE, 1L);
         storage.audit().log(100L, accountId, "login", "1.1.1.1", null);
         storage.audit().log(300L, accountId, "logout", "1.1.1.1", null);
         storage.bindingHistory().insert(accountId, "email", "p@qq.com",
@@ -217,7 +217,7 @@ class StorageTest {
     @Test
     void createAccountWritesAccountIdentityAndBindingsAtomically() {
         long id = storage.createAccount("Zoe", "zoe", UUID.randomUUID(), "$2a$10$h",
-                AccountStatus.ACTIVE, null, 500L, IdentityKind.JAVA, "zoe",
+                AccountStatus.ACTIVE, 500L, IdentityKind.JAVA, "zoe",
                 Map.of("email", "zoe@qq.com", "qq", "10009"));
 
         assertEquals("Zoe", storage.accounts().findById(id).orElseThrow().name());
@@ -229,11 +229,11 @@ class StorageTest {
 
     @Test
     void createAccountRollsBackEverythingOnFailure() {
-        storage.createAccount("Dup", "dup", UUID.randomUUID(), "h", AccountStatus.ACTIVE, null, 1L,
+        storage.createAccount("Dup", "dup", UUID.randomUUID(), "h", AccountStatus.ACTIVE, 1L,
                 IdentityKind.JAVA, "dup", Map.of());
 
         assertThrows(StorageException.class, () -> storage.createAccount("Dup2", "dup", UUID.randomUUID(), "h",
-                AccountStatus.ACTIVE, null, 2L, IdentityKind.JAVA, "dup2", Map.of("email", "dup2@qq.com")));
+                AccountStatus.ACTIVE, 2L, IdentityKind.JAVA, "dup2", Map.of("email", "dup2@qq.com")));
 
         // 名称冲突导致整体回滚：不应残留身份 / 绑定 / 第二个账号
         assertEquals(1, storage.accounts().count());

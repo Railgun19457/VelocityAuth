@@ -385,7 +385,7 @@ plugin → bot   verify.matched.ack { code:"MC-8F3K2A", consumed:true }
 |---|---|---|
 | `found` | bool | 是否存在 |
 | `id` / `name` / `uuid` / `status` | int / string | 账号标识与状态 |
-| `premium_uuid` / `last_server` / `last_ip` | string | 无则为空串 |
+| `last_server` / `last_ip` | string | 无则为空串 |
 | `created_at` / `last_login_at` | int | unix 秒；从未登录为 0 |
 | `bindings` | string | 每条 `provider:identifier:verified_at`，`;` 连接（如 `email:a@qq.com:1700000000;qq:10001:1700000001`） |
 | `identities` | string | 每条 `kind:identifier`（`java` / `bedrock`），`,` 连接 |

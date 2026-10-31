@@ -49,7 +49,7 @@ class BindingIndexTest {
 
     private long account(String name) {
         return storage.accounts().insert(name, name.toLowerCase(), UUID.randomUUID(), "h",
-                AccountStatus.ACTIVE, null, 1L);
+                AccountStatus.ACTIVE, 1L);
     }
 
     @Test

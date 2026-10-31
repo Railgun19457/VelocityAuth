@@ -103,7 +103,6 @@ public final class AccountQueryHandler implements BotQueryHandler {
         out.put("name", view.name());
         out.put("uuid", view.uuid().toString());
         out.put("status", view.status());
-        out.put("premium_uuid", orEmpty(view.premiumUuid()));
         out.put("last_server", orEmpty(view.lastServer()));
         out.put("created_at", view.createdAt());
         out.put("last_login_at", orZero(view.lastLoginAt()));

@@ -91,7 +91,7 @@ class RecoveryServiceTest {
         recovery = new RecoveryService(storage, verifications, async);
 
         accountId = storage.accounts().insert("Alice", "alice", UUID.randomUUID(), "h",
-                AccountStatus.ACTIVE, null, 1L);
+                AccountStatus.ACTIVE, 1L);
         storage.bindings().insert(accountId, "email", "alice@qq.com", 1L, 1L);
     }
 

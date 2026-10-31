@@ -19,7 +19,7 @@ import java.util.List;
 public final class Schema {
 
     /** 当前期望的 schema 版本。 */
-    public static final int CURRENT_VERSION = 3;
+    public static final int CURRENT_VERSION = 4;
 
     private Schema() {
     }
@@ -40,7 +40,10 @@ public final class Schema {
             for (int version = current + 1; version <= CURRENT_VERSION; version++) {
                 applyMigration(connection, database.dialect(), version);
                 writeVersion(connection, database.dialect(), version);
-                logger.info("[VelocityAuth] 已应用数据库迁移 v{}", version);
+                // 全新库只是一次性建表，逐版本打印会让首次安装的日志显得像在"迁移"
+                if (!fresh) {
+                    logger.info("[VelocityAuth] 已应用数据库迁移 v{}", version);
+                }
             }
             if (fresh) {
                 logger.info("[VelocityAuth] 已初始化数据库结构（schema v{}）", CURRENT_VERSION);
@@ -93,16 +96,31 @@ public final class Schema {
         for (String statement : migrationStatements(dialect, version)) {
             try (Statement st = connection.createStatement()) {
                 st.execute(statement);
+            } catch (SQLException e) {
+                // v4 只是删列：列已不存在（手动清理过）时视为已完成，不应阻断启动
+                if (version != 4) {
+                    throw e;
+                }
             }
         }
     }
 
-    /** 按版本返回迁移语句。v1 初始建表；v2 登录历史；v3 绑定历史（解绑/注销后可追溯 + 冷却）。 */
+    /**
+     * v4：移除从未被写入的 {@code premium_uuid} 列（正版分支已整体删除）。
+     * <p>
+     * v1 建表时带着这一列，这里按迁移规则在末尾追加删除，不修改历史步骤。
+     */
+    private static List<String> dropPremiumUuidStatements(Dialect dialect) {
+        return List.of("ALTER TABLE accounts DROP COLUMN premium_uuid");
+    }
+
+    /** 按版本返回迁移语句。v1 初始建表；v2 登录历史；v3 绑定历史（解绑/注销后可追溯 + 冷却）；v4 移除 premium_uuid。 */
     private static List<String> migrationStatements(Dialect dialect, int version) {
         return switch (version) {
             case 1 -> initialStatements(dialect);
             case 2 -> loginHistoryStatements(dialect);
             case 3 -> bindingHistoryStatements(dialect);
+            case 4 -> dropPremiumUuidStatements(dialect);
             default -> throw new StorageException("缺少 v" + version + " 的迁移脚本");
         };
     }

@@ -47,7 +47,7 @@ public record VelocityAuthConfig(
 
     // ---------------------------------------------------------------- auth
 
-    public record Auth(AccountName accountName, Password password, int bcryptCost, Session session, Premium premium,
+    public record Auth(AccountName accountName, Password password, int bcryptCost, Session session,
                        Bedrock bedrock) {
     }
 
@@ -58,10 +58,6 @@ public record VelocityAuthConfig(
     }
 
     public record Session(boolean enabled, int ttlMinutes, boolean bindToIp) {
-    }
-
-    public record Premium(boolean enabled, boolean keepRealUuid, boolean requirePassword, NameConflict nameConflict) {
-        public enum NameConflict { FIRST_COME, PREMIUM_PRIORITY }
     }
 
     /**
@@ -232,15 +228,7 @@ public record VelocityAuthConfig(
                 sessionNode.intValue("ttl-minutes", 30),
                 sessionNode.bool("bind-to-ip", true));
 
-        ConfigNode premiumNode = authNode.section("premium");
-        String conflict = premiumNode.enumValue("name-conflict", "first-come", "first-come", "premium-priority");
-        Premium premium = new Premium(
-                premiumNode.bool("enabled", true),
-                premiumNode.bool("keep-real-uuid", true),
-                premiumNode.bool("require-password", true),
-                conflict.equals("first-come") ? Premium.NameConflict.FIRST_COME : Premium.NameConflict.PREMIUM_PRIORITY);
-
-        Auth auth = new Auth(accountName, password, bcryptCost, session, premium,
+        Auth auth = new Auth(accountName, password, bcryptCost, session,
                 new Bedrock(authNode.section("bedrock").bool("auto-link", true)));
 
         ConfigNode bindNode = root.section("binding");

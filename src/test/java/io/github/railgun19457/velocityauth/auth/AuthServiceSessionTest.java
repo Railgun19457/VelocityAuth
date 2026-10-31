@@ -64,7 +64,7 @@ class AuthServiceSessionTest {
         cache.load();
 
         accountId = storage.createAccount("alice", "alice", UUID.randomUUID(), "h",
-                AccountStatus.ACTIVE, null, 1L, IdentityKind.JAVA, "alice", java.util.Map.of());
+                AccountStatus.ACTIVE, 1L, IdentityKind.JAVA, "alice", java.util.Map.of());
         Account account = storage.accounts().findById(accountId).orElseThrow();
         cache.put(account);
         cache.indexIdentity(IdentityKind.JAVA, "alice", accountId);

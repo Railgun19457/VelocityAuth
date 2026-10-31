@@ -43,7 +43,7 @@ class AccountQueryServiceTest {
                 new VelocityAuthConfig.Sqlite("query.db"),
                 new VelocityAuthConfig.Mysql("127.0.0.1", 3306, "x", "root", ""), 90, 90, 90), tempDir, NOPLogger.NOP_LOGGER);
         uuid = UUID.randomUUID();
-        accountId = storage.createAccount("Alice", "alice", uuid, "h", AccountStatus.ACTIVE, null,
+        accountId = storage.createAccount("Alice", "alice", uuid, "h", AccountStatus.ACTIVE,
                 100L, IdentityKind.JAVA, "alice", Map.of("email", "alice@qq.com", "qq", "10001"));
         storage.accounts().updateLastLogin(accountId, 500L, "1.2.3.4");
         storage.loginHistory().insert(accountId, 500L, "1.2.3.4", LoginHistory.SUCCESS, "alice", null);

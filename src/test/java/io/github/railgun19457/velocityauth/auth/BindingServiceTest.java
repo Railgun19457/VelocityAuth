@@ -44,9 +44,9 @@ class BindingServiceTest {
         bindings = service(0);
 
         long aliceId = storage.accounts().insert("Alice", "alice", UUID.randomUUID(), "h",
-                AccountStatus.ACTIVE, null, 1L);
+                AccountStatus.ACTIVE, 1L);
         long bobId = storage.accounts().insert("Bob", "bob", UUID.randomUUID(), "h",
-                AccountStatus.ACTIVE, null, 1L);
+                AccountStatus.ACTIVE, 1L);
         alice = storage.accounts().findById(aliceId).orElseThrow();
         bob = storage.accounts().findById(bobId).orElseThrow();
     }

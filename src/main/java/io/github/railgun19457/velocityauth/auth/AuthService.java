@@ -154,7 +154,7 @@ public final class AuthService {
                 String hash = hasher.hash(password);
                 long now = nowSeconds();
                 long accountId = storage.createAccount(name, nameLower, ProfileFactory.offlineUuid(name),
-                        hash, status, null, now, identity.kind(), identity.identifier(),
+                        hash, status, now, identity.kind(), identity.identifier(),
                         java.util.Map.of());
                 storage.audit().log(now, accountId, AuditEntry.REGISTER, ip,
                         "connection=" + identity.identifier() + " kind=" + identity.kind().dbValue()

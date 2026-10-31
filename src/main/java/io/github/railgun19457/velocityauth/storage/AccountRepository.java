@@ -20,7 +20,7 @@ import java.util.UUID;
 public final class AccountRepository {
 
     private static final String COLUMNS =
-            "id, name, name_lower, uuid, password_hash, status, premium_uuid, last_server,"
+            "id, name, name_lower, uuid, password_hash, status, last_server,"
                     + " created_at, last_login_at, last_ip";
 
     private final Database database;
@@ -128,9 +128,9 @@ public final class AccountRepository {
     }
 
     public long insert(String name, String nameLower, UUID uuid, String passwordHash,
-                       AccountStatus status, UUID premiumUuid, long createdAt) {
+                       AccountStatus status, long createdAt) {
         return database.inTransaction(connection -> insert(connection, name, nameLower, uuid, passwordHash,
-                status, premiumUuid, createdAt));
+                status, createdAt));
     }
 
     /**
@@ -138,23 +138,18 @@ public final class AccountRepository {
      * 不在此方法内提交/回滚。
      */
     long insert(Connection connection, String name, String nameLower, UUID uuid, String passwordHash,
-                AccountStatus status, UUID premiumUuid, long createdAt) throws SQLException {
+                AccountStatus status, long createdAt) throws SQLException {
         try (PreparedStatement ps = connection.prepareStatement(
-                "INSERT INTO accounts (name, name_lower, uuid, password_hash, status, premium_uuid,"
+                "INSERT INTO accounts (name, name_lower, uuid, password_hash, status,"
                         + " last_server, created_at, last_login_at, last_ip)"
-                        + " VALUES (?, ?, ?, ?, ?, ?, NULL, ?, NULL, NULL)",
+                        + " VALUES (?, ?, ?, ?, ?, NULL, ?, NULL, NULL)",
                 Statement.RETURN_GENERATED_KEYS)) {
             ps.setString(1, name);
             ps.setString(2, nameLower);
             ps.setString(3, uuid.toString());
             ps.setString(4, passwordHash);
             ps.setString(5, status.dbValue());
-            if (premiumUuid == null) {
-                ps.setNull(6, java.sql.Types.VARCHAR);
-            } else {
-                ps.setString(6, premiumUuid.toString());
-            }
-            ps.setLong(7, createdAt);
+            ps.setLong(6, createdAt);
             ps.executeUpdate();
             try (ResultSet keys = ps.getGeneratedKeys()) {
                 if (keys.next()) {
@@ -199,17 +194,6 @@ public final class AccountRepository {
                 ps.setString(2, ip);
             }
             ps.setLong(3, id);
-        });
-    }
-
-    public void updatePremiumUuid(long id, UUID premiumUuid) {
-        update("UPDATE accounts SET premium_uuid = ? WHERE id = ?", ps -> {
-            if (premiumUuid == null) {
-                ps.setNull(1, java.sql.Types.VARCHAR);
-            } else {
-                ps.setString(1, premiumUuid.toString());
-            }
-            ps.setLong(2, id);
         });
     }
 
@@ -288,7 +272,6 @@ public final class AccountRepository {
     }
 
     private static Account map(ResultSet rs) throws SQLException {
-        String premium = rs.getString("premium_uuid");
         long lastLoginRaw = rs.getLong("last_login_at");
         Long lastLogin = rs.wasNull() ? null : lastLoginRaw;
         return new Account(
@@ -298,7 +281,6 @@ public final class AccountRepository {
                 UUID.fromString(rs.getString("uuid")),
                 rs.getString("password_hash"),
                 AccountStatus.fromDb(rs.getString("status")),
-                premium == null || premium.isEmpty() ? null : UUID.fromString(premium),
                 rs.getString("last_server"),
                 rs.getLong("created_at"),
                 lastLogin,

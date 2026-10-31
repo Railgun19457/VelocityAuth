@@ -1,4 +1,4 @@
-# version: 3
+# version: 4
 # ============ VelocityAuth English language file ============
 # Text uses MiniMessage syntax; {xxx} are placeholders.
 prefix: "<gold>[Auth]</gold> "
@@ -128,7 +128,6 @@ auth:
   session-restored: "<green>Automatically logged in via session persistence.</green>"
   authenticated: "<green>Authentication successful.</green>"
   account-locked: "<red>This account is locked.</red>"
-  name-occupied: "<red>The name {name} is already taken and cannot be used.</red>"
   reconnect-required: "<yellow>Please reconnect.</yellow>"
   logout-disconnect: "<yellow>Logged out, please reconnect.</yellow>"
   login-disconnect: "<green>Logged in, please reconnect.</green>"

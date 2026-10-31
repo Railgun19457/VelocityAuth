@@ -11,7 +11,6 @@ import java.util.UUID;
  * @param uuid         规范 UUID（由小写规范名派生）
  * @param passwordHash bcrypt 哈希
  * @param status       账号状态
- * @param premiumUuid  正版真实 UUID（若有）
  * @param lastServer   上次所在子服
  * @param createdAt    注册时间（unix 秒）
  * @param lastLoginAt  上次登录时间（unix 秒，可空）
@@ -24,7 +23,6 @@ public record Account(
         UUID uuid,
         String passwordHash,
         AccountStatus status,
-        UUID premiumUuid,
         String lastServer,
         long createdAt,
         Long lastLoginAt,

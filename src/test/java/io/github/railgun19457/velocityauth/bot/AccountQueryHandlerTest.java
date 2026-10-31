@@ -44,7 +44,7 @@ class AccountQueryHandlerTest {
                 new VelocityAuthConfig.Mysql("127.0.0.1", 3306, "x", "root", ""), 90, 90, 90), tempDir, NOPLogger.NOP_LOGGER);
         long now = System.currentTimeMillis() / 1000L;
         long accountId = storage.createAccount("Alice", "alice", UUID.randomUUID(), "h", AccountStatus.ACTIVE,
-                null, now - 3600L, IdentityKind.JAVA, "alice", Map.of("email", "alice@qq.com", "qq", "10001"));
+                now - 3600L, IdentityKind.JAVA, "alice", Map.of("email", "alice@qq.com", "qq", "10001"));
         storage.accounts().updateLastLogin(accountId, now - 600L, "1.2.3.4");
         storage.loginHistory().insert(accountId, now - 600L, "1.2.3.4", LoginHistory.SUCCESS, "alice", null);
         storage.loginHistory().insert(accountId, 400L, "1.2.3.4", LoginHistory.FAILED, "alice",

@@ -16,7 +16,6 @@ public final class AuthSession {
     private final long connectedAt;
 
     private volatile Account account;
-    private volatile boolean premium;
     private volatile boolean authenticated;
     private volatile long authenticatedAt;
     private volatile Player player;
@@ -61,10 +60,6 @@ public final class AuthSession {
         return authenticated;
     }
 
-    public boolean premium() {
-        return premium;
-    }
-
     public long authenticatedAt() {
         return authenticatedAt;
     }
@@ -80,22 +75,12 @@ public final class AuthSession {
     /** 标记为已认证（账号身份）。 */
     public void authenticate(Account account) {
         this.account = account;
-        this.premium = false;
-        this.authenticated = true;
-        this.authenticatedAt = System.currentTimeMillis();
-    }
-
-    /** 标记为正版玩家（保留真实 profile；account 可能为空）。 */
-    public void authenticatePremium(Account account) {
-        this.account = account;
-        this.premium = true;
         this.authenticated = true;
         this.authenticatedAt = System.currentTimeMillis();
     }
 
     public void deauthenticate() {
         this.account = null;
-        this.premium = false;
         this.authenticated = false;
         this.authenticatedAt = 0L;
     }
