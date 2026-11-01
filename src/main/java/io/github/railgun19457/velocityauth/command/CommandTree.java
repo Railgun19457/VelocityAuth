@@ -1,6 +1,7 @@
 package io.github.railgun19457.velocityauth.command;
 
 import com.mojang.brigadier.Command;
+import com.mojang.brigadier.arguments.ArgumentType;
 import com.mojang.brigadier.arguments.StringArgumentType;
 import com.mojang.brigadier.builder.ArgumentBuilder;
 import com.mojang.brigadier.builder.LiteralArgumentBuilder;
@@ -29,14 +30,30 @@ public final class CommandTree {
     }
 
     /** 一个位置参数。{@code suggests} 为空表示不提供候选。 */
-    public record Arg(String name, Function<CommandContext<CommandSource>, List<String>> suggests) {
+    public record Arg(String name, Function<CommandContext<CommandSource>, List<String>> suggests,
+                      ArgumentType<String> type) {
 
         public static Arg of(String name) {
-            return new Arg(name, null);
+            return new Arg(name, null, StringArgumentType.string());
         }
 
         public static Arg of(String name, Function<CommandContext<CommandSource>, List<String>> suggests) {
-            return new Arg(name, suggests);
+            return new Arg(name, suggests, StringArgumentType.string());
+        }
+
+        /**
+         * 贪婪字符串参数（吃满整行，允许邮箱等含特殊字符的输入）。
+         * <p>
+         * Brigadier 的 {@code string()} 只允许 {@code [0-9A-Za-z_\-+.]} 的裸字符串，
+         * 邮箱里的 {@code @} 会触发「参数后应有空格分隔」解析错误；贪婪串可任意输入。
+         * 注意：贪婪串必须作为<b>最后一个</b>位置参数，否则会吞掉后续参数。
+         */
+        public static Arg greedy(String name) {
+            return new Arg(name, null, StringArgumentType.greedyString());
+        }
+
+        public static Arg greedy(String name, Function<CommandContext<CommandSource>, List<String>> suggests) {
+            return new Arg(name, suggests, StringArgumentType.greedyString());
         }
     }
 
@@ -67,7 +84,7 @@ public final class CommandTree {
         for (int i = args.length - 1; i >= 0; i--) {
             Arg spec = args[i];
             RequiredArgumentBuilder<CommandSource, String> node =
-                    RequiredArgumentBuilder.argument(spec.name(), StringArgumentType.string());
+                    RequiredArgumentBuilder.argument(spec.name(), spec.type());
             if (spec.suggests() != null) {
                 node.suggests(adapt(spec.suggests()));
             }

@@ -42,19 +42,19 @@ public final class CommandRegistrar {
 
         register(manager, "login", new LoginCommand(plugin, registry),
                 CommandTree.Arg.of("account"),
-                CommandTree.Arg.of("password"));
+                CommandTree.Arg.greedy("password"));
 
         register(manager, "register", new RegisterCommand(plugin, registry),
                 CommandTree.Arg.of("account"),
                 CommandTree.Arg.of("password"),
-                CommandTree.Arg.of("confirm"));
+                CommandTree.Arg.greedy("confirm"));
 
         register(manager, "verify", new VerifyCommand(plugin, registry),
                 CommandTree.Arg.of("code", ctx -> List.of("cancel")));
 
         register(manager, "resetpassword", new ResetPasswordCommand(plugin, registry),
                 CommandTree.Arg.of("password"),
-                CommandTree.Arg.of("confirm"));
+                CommandTree.Arg.greedy("confirm"));
 
         register(manager, "forgot", new ForgotCommand(plugin, registry),
                 CommandTree.Arg.of("account"),
@@ -64,11 +64,11 @@ public final class CommandRegistrar {
 
         register(manager, "changepassword", new ChangePasswordCommand(plugin, registry),
                 CommandTree.Arg.of("old-password"),
-                CommandTree.Arg.of("new-password"));
+                CommandTree.Arg.greedy("new-password"));
 
         register(manager, "bind", new BindCommand(plugin, registry),
                 CommandTree.Arg.of("channel", ctx -> channelIds()),
-                CommandTree.Arg.of("value"));
+                CommandTree.Arg.greedy("value"));
 
         register(manager, "unbind", new UnbindCommand(plugin, registry),
                 CommandTree.Arg.of("channel", ctx -> channelIds()));
@@ -143,7 +143,7 @@ public final class CommandRegistrar {
                 CommandTree.Arg.of("account"),
                 CommandTree.Arg.of("action",
                         ctx -> List.of("info", "setpassword", "unbind", "lock", "unlock", "delete")),
-                CommandTree.Arg.of("value", ctx -> channelIds()));
+                CommandTree.Arg.greedy("value", ctx -> channelIds()));
         addSub(root, admin, "forcelogin",
                 CommandTree.Arg.of("account"),
                 CommandTree.Arg.of("kick", ctx -> List.of("--kick")));
@@ -180,7 +180,7 @@ public final class CommandRegistrar {
         }
         CommandTree.Arg spec = args[index];
         RequiredArgumentBuilder<CommandSource, String> node =
-                RequiredArgumentBuilder.argument(spec.name(), StringArgumentType.string());
+                RequiredArgumentBuilder.argument(spec.name(), spec.type());
         if (spec.suggests() != null) {
             node.suggests(CommandTree.adapt(spec.suggests()));
         }

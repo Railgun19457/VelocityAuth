@@ -1,5 +1,7 @@
 package io.github.railgun19457.velocityauth.command;
 
+import com.mojang.brigadier.CommandDispatcher;
+import com.mojang.brigadier.ParseResults;
 import com.mojang.brigadier.builder.LiteralArgumentBuilder;
 import com.mojang.brigadier.tree.CommandNode;
 import com.velocitypowered.api.command.CommandSource;
@@ -72,5 +74,47 @@ class CommandTreeTest {
 
         // value 没声明 suggests，允许为空（但节点必须存在，否则第二个参数无法输入）
         assertNotNull(channel.getChild("value"), "value 节点不存在");
+    }
+
+    @Test
+    void greedyValueParsesEmailWithoutTrailingDataError() {
+        List<String> collected = new ArrayList<>();
+        LiteralArgumentBuilder<CommandSource> tree = CommandTree.positional(
+                "bind", null,
+                (source, args) -> collected.addAll(List.of(args)),
+                CommandTree.Arg.of("channel", ctx -> List.of("email", "qq")),
+                CommandTree.Arg.greedy("value"));
+
+        CommandDispatcher<CommandSource> dispatcher = new CommandDispatcher<>();
+        dispatcher.register(tree);
+
+        // 邮箱含 @，string() 会在这里抛「参数后应有空格分隔」；greedy 必须能完整解析
+        ParseResults<CommandSource> parse = dispatcher.parse("bind email user@example.com", null);
+        assertTrue(parse.getExceptions().isEmpty(),
+                "解析邮箱不应报错：" + parse.getExceptions());
+        assertTrue(parse.getReader().getString().isEmpty() || !parse.getReader().canRead(),
+                "应消费完整输入，不得留下尾部数据");
+
+        try {
+            dispatcher.execute(parse);
+        } catch (com.mojang.brigadier.exceptions.CommandSyntaxException e) {
+            throw new AssertionError("执行解析结果不应抛异常", e);
+        }
+        assertEquals(List.of("email", "user@example.com"), collected,
+                "贪婪参数应保留邮箱原值");
+    }
+
+    @Test
+    void greedyMustBeLastArg() {
+        // 贪婪参数不在最后：后面的参数会被吞掉，但这种用法应仍能注册（只是行为如预期）
+        LiteralArgumentBuilder<CommandSource> tree = CommandTree.positional(
+                "login", null,
+                (source, args) -> { },
+                CommandTree.Arg.greedy("password"),
+                CommandTree.Arg.of("confirm"));
+        CommandNode<CommandSource> root = tree.build();
+        assertNotNull(root.getChild("password"), "贪婪参数节点应存在");
+        assertNotNull(root.getChild("password").getChild("confirm"),
+                "贪婪参数后面的节点仍应挂上（虽然后续参数无法再输入）");
     }
 }
