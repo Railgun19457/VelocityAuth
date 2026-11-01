@@ -17,18 +17,21 @@ import java.util.Set;
 
 /**
  * 未认证隔离：拦截除认证相关命令外的一切命令（DESIGN 4.4）。
+ * <p>
+ * 注意：管理员命令 {@code /velocityauth}（{@code /vauth}）**不**在放行列表里。
+ * 权限节点只说明「谁允许管理」，不代表「未登录就能用」——未认证玩家的身份尚未验证，
+ * 任何人（含冒名顶替者）都可能冒用管理员的名字拿权限；必须登录后才能用管理命令。
  */
 public final class CommandGuardListener {
 
-    /** 未认证玩家仍可执行的命令（认证相关 + 管理命令）。 */
+    /** 未认证玩家仍可执行的命令（仅认证相关）。 */
     private static final Set<String> ALLOWED = Set.of(
             "login",
             "register",
             "bind",
             "forgot",
             "verify",
-            "resetpassword",
-            "velocityauth", "vauth");
+            "resetpassword");
 
     private final VelocityAuthPlugin plugin;
     private final AuthSessionRegistry registry;
@@ -52,7 +55,7 @@ public final class CommandGuardListener {
             return;
         }
         String command = firstToken(event.getCommand());
-        if (ALLOWED.contains(command)) {
+        if (allowedWhenUnauthenticated(command)) {
             return;
         }
         event.setResult(CommandExecuteEvent.CommandResult.denied());
@@ -78,10 +81,15 @@ public final class CommandGuardListener {
         RootCommandNode<?> root = event.getRootNode();
         // 先复制再删，避免遍历时修改同一个集合
         for (CommandNode<?> child : new ArrayList<>(root.getChildren())) {
-            if (!ALLOWED.contains(child.getName())) {
+            if (!allowedWhenUnauthenticated(child.getName())) {
                 root.getChildren().remove(child);
             }
         }
+    }
+
+    /** 未认证玩家能否执行该命令（统一判断，供执行拦截与补全裁剪共用）。 */
+    static boolean allowedWhenUnauthenticated(String command) {
+        return ALLOWED.contains(command);
     }
 
     static String firstToken(String commandLine) {

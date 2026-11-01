@@ -48,6 +48,14 @@ public final class AdminCommand implements SimpleCommand {
             source.sendMessage(plugin.lang().msg("generic.no-permission"));
             return;
         }
+        // 兜底：玩家必须先完成登录。权限节点只代表「允许管理」，不代表「未认证就能用」；
+        // 未认证时身份尚未验证，任何人都可能冒用管理员的名字拿到权限。
+        // 正常路径已由 CommandGuardListener 拦截，这里防止经 API / 其它入口绕过。
+        if (source instanceof Player player
+                && !plugin.sessionRegistry().get(player).map(AuthSession::authenticated).orElse(false)) {
+            source.sendMessage(plugin.lang().msg("auth.login-required"));
+            return;
+        }
         String[] args = invocation.arguments();
         if (args.length == 0) {
             usage(source);
@@ -405,7 +413,15 @@ public final class AdminCommand implements SimpleCommand {
 
     @Override
     public boolean hasPermission(Invocation invocation) {
-        // 同时作为命令节点的 requires 谓词：权限不足时该命令不出现在补全里，也无法执行
-        return invocation.source().hasPermission(PERMISSION);
+        // 同时作为命令节点的 requires 谓词：权限不足时该命令不出现在补全里，也无法执行。
+        // 玩家还要求已登录——未认证身份不可信，不能因为「名字对上了」就放行管理命令。
+        CommandSource source = invocation.source();
+        if (!source.hasPermission(PERMISSION)) {
+            return false;
+        }
+        if (source instanceof Player player) {
+            return plugin.sessionRegistry().get(player).map(AuthSession::authenticated).orElse(false);
+        }
+        return true;
     }
 }
