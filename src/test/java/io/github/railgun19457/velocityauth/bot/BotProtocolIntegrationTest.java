@@ -42,7 +42,9 @@ class BotProtocolIntegrationTest {
                         "enabled", true,
                         "listen", "127.0.0.1",
                         "port", port,
-                        "pairing", Map.of("ttl-seconds", 600, "max-attempts", 5)),
+                        "pairing", Map.of("ttl-seconds", 600, "max-attempts", 5),
+                        "query", Map.of("enabled", true),
+                        "admin", Map.of("enabled", true, "rate-limit-per-minute", 1000)),
                 "binding", Map.of("social", Map.of("qq", Map.of("enabled", true))),
                 "security", Map.of("handshake-timeout-seconds", 15, "clock-skew-seconds", 120))));
     }
@@ -68,6 +70,18 @@ class BotProtocolIntegrationTest {
             case "query.account" -> QueryResponse.ok(Map.of("found", false));
             case "query.history" -> QueryResponse.error("bad_request", "history disabled in test");
             case "query.stats" -> QueryResponse.ok(Map.of("accounts_total", 42, "online", 7));
+            case "query.accounts.list" -> QueryResponse.ok(Map.of(
+                    "found", true, "total", 1, "count", 1,
+                    "data", "[{\"name\":\"Alice\"}]"));
+            case "query.audit.list" -> QueryResponse.ok(Map.of(
+                    "found", true, "total", 1, "count", 1,
+                    "data", "[{\"action\":\"login\"}]"));
+            default -> QueryResponse.error("bad_request", "unsupported: " + type);
+        }, (type, payload, clientId, remoteIp) -> switch (type) {
+            case "admin.account.set-status" -> QueryResponse.ok(Map.of(
+                    "ok", true, "id", 1, "name", "Alice", "status", "locked"));
+            case "admin.account.delete" -> QueryResponse.ok(Map.of(
+                    "ok", true, "id", 1, "name", "Alice", "deleted", true));
             default -> QueryResponse.error("bad_request", "unsupported: " + type);
         });
         server.start();
@@ -270,6 +284,118 @@ class BotProtocolIntegrationTest {
         Map<String, Object> result = bot.awaitQueryResult(requestId, 10);
         assertEquals("42", result.get("accounts_total"));
         assertEquals("7", result.get("online"));
+
+        bot.closeBlocking();
+    }
+
+    @Test
+    void capabilitiesAdvertiseAdminAndQuery() throws Exception {
+        PairingService.Created created = pairings.create(600, 5);
+        TestBotClient bot = new TestBotClient(uri(), created.code());
+        bot.setPairingId(created.pairingId());
+        assertTrue(bot.connectBlocking(5, java.util.concurrent.TimeUnit.SECONDS));
+        assertTrue(bot.awaitReady(20), "握手未完成：" + bot.failure.getNow("未完成"));
+
+        assertTrue(server.capabilities().contains(BotSession.CAPABILITY_VERIFY),
+                server.capabilities().toString());
+        assertTrue(server.capabilities().contains(BotSession.CAPABILITY_QUERY),
+                server.capabilities().toString());
+        assertTrue(server.capabilities().contains(BotSession.CAPABILITY_ADMIN),
+                server.capabilities().toString());
+
+        bot.closeBlocking();
+    }
+
+    @Test
+    void queryAccountsListRoundTrips() throws Exception {
+        PairingService.Created created = pairings.create(600, 5);
+        TestBotClient bot = new TestBotClient(uri(), created.code());
+        bot.setPairingId(created.pairingId());
+        assertTrue(bot.connectBlocking(5, java.util.concurrent.TimeUnit.SECONDS));
+        assertTrue(bot.awaitReady(20), "握手未完成：" + bot.failure.getNow("未完成"));
+
+        String requestId = bot.sendQuery("query.accounts.list", Map.of("keyword", "ali", "limit", "10"));
+        Map<String, Object> result = bot.awaitQueryResult(requestId, 10);
+        assertEquals("1", result.get("total"));
+        assertTrue(String.valueOf(result.get("data")).contains("Alice"), result.toString());
+
+        bot.closeBlocking();
+    }
+
+    @Test
+    void queryAuditListRoundTrips() throws Exception {
+        PairingService.Created created = pairings.create(600, 5);
+        TestBotClient bot = new TestBotClient(uri(), created.code());
+        bot.setPairingId(created.pairingId());
+        assertTrue(bot.connectBlocking(5, java.util.concurrent.TimeUnit.SECONDS));
+        assertTrue(bot.awaitReady(20), "握手未完成：" + bot.failure.getNow("未完成"));
+
+        String requestId = bot.sendQuery("query.audit.list", Map.of("limit", "10"));
+        Map<String, Object> result = bot.awaitQueryResult(requestId, 10);
+        assertEquals("1", result.get("total"));
+        assertTrue(String.valueOf(result.get("data")).contains("login"), result.toString());
+
+        bot.closeBlocking();
+    }
+
+    @Test
+    void adminSetStatusRoundTrips() throws Exception {
+        PairingService.Created created = pairings.create(600, 5);
+        TestBotClient bot = new TestBotClient(uri(), created.code());
+        bot.setPairingId(created.pairingId());
+        assertTrue(bot.connectBlocking(5, java.util.concurrent.TimeUnit.SECONDS));
+        assertTrue(bot.awaitReady(20), "握手未完成：" + bot.failure.getNow("未完成"));
+
+        String requestId = bot.sendQuery("admin.account.set-status",
+                Map.of("name", "Alice", "status", "locked", "actor", "admin"));
+        Map<String, Object> result = bot.awaitQueryResult(requestId, 10);
+        assertEquals("true", result.get("ok"));
+        assertEquals("locked", result.get("status"));
+
+        bot.closeBlocking();
+    }
+
+    @Test
+    void adminIsRejectedWhenClientNotWhitelisted() throws Exception {
+        // 服务端只允许 "other-bot" 发管理指令，测试客户端应被拒
+        config = VelocityAuthConfig.from(ConfigNode.root(Map.of(
+                "bot", Map.of(
+                        "enabled", true,
+                        "listen", "127.0.0.1",
+                        "port", 0,
+                        "pairing", Map.of("ttl-seconds", 600, "max-attempts", 5),
+                        "query", Map.of("enabled", true),
+                        "admin", Map.of("enabled", true, "clients", List.of("other-bot"))),
+                "binding", Map.of("social", Map.of("qq", Map.of("enabled", true))),
+                "security", Map.of("handshake-timeout-seconds", 15, "clock-skew-seconds", 120))));
+        // 重建服务端以应用新配置
+        server.shutdown();
+        server = new BotServer(config.bot(), keyStore, pairings, () -> config,
+                new PluginLogger(NOPLogger.NOP_LOGGER), new BotServer.Handler() {
+            @Override
+            public boolean onVerifyMatched(String providerId, String code, String subject, String scope,
+                                           String displayName) {
+                return true;
+            }
+        }, (type, payload) -> QueryResponse.ok(Map.of("found", true)),
+                (type, payload, clientId, remoteIp) -> QueryResponse.ok(Map.of("ok", true)));
+        server.start();
+        long deadline = System.currentTimeMillis() + 5000;
+        while (server.getPort() == 0 && System.currentTimeMillis() < deadline) {
+            Thread.sleep(50);
+        }
+        this.port = server.getPort();
+
+        PairingService.Created created = pairings.create(600, 5);
+        TestBotClient bot = new TestBotClient(uri(), created.code());
+        bot.setPairingId(created.pairingId());
+        assertTrue(bot.connectBlocking(5, java.util.concurrent.TimeUnit.SECONDS));
+        assertTrue(bot.awaitReady(20), "握手未完成：" + bot.failure.getNow("未完成"));
+
+        String requestId = bot.sendQuery("admin.account.set-status",
+                Map.of("name", "Alice", "status", "locked"));
+        Map<String, Object> error = bot.awaitQueryError(requestId, 10);
+        assertEquals("admin_disabled", error.get("code"));
 
         bot.closeBlocking();
     }

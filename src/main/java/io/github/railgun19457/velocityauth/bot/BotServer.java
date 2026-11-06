@@ -32,8 +32,12 @@ public final class BotServer extends WebSocketServer {
     private final PluginLogger log;
     private final Handler handler;
     private final BotQueryHandler queryHandler;
+    private final BotAdminHandler adminHandler;
 
     private final Set<BotSession> sessions = ConcurrentHashMap.newKeySet();
+    /** admin.* 限流（按 client_id 计数）。 */
+    private final io.github.railgun19457.velocityauth.auth.RateLimiter adminRateLimiter =
+            new io.github.railgun19457.velocityauth.auth.RateLimiter();
     private final ScheduledExecutorService housekeeping = Executors.newSingleThreadScheduledExecutor(runnable -> {
         Thread thread = new Thread(runnable, "VelocityAuth-BotHousekeeping");
         thread.setDaemon(true);
@@ -51,7 +55,7 @@ public final class BotServer extends WebSocketServer {
 
     public BotServer(VelocityAuthConfig.Bot settings, KeyStore keyStore, PairingService pairingService,
                      Supplier<VelocityAuthConfig> config, PluginLogger log, Handler handler,
-                     BotQueryHandler queryHandler) {
+                     BotQueryHandler queryHandler, BotAdminHandler adminHandler) {
         super(new InetSocketAddress(settings.listen(), settings.port()));
         this.settings = settings;
         this.keyStore = keyStore;
@@ -60,14 +64,42 @@ public final class BotServer extends WebSocketServer {
         this.log = log;
         this.handler = handler;
         this.queryHandler = queryHandler;
+        this.adminHandler = adminHandler;
         setReuseAddr(true);
     }
 
-    /** 本实例声明的服务端能力；启用查询接口时附带 {@code query.v1}。 */
+    /** 本实例声明的服务端能力；按配置附带 {@code query.v1} / {@code admin.v1}。 */
     public List<String> capabilities() {
-        return queryHandler == null
-                ? List.of(BotSession.CAPABILITY_VERIFY)
-                : List.of(BotSession.CAPABILITY_VERIFY, BotSession.CAPABILITY_QUERY);
+        List<String> out = new java.util.ArrayList<>();
+        out.add(BotSession.CAPABILITY_VERIFY);
+        if (queryHandler != null) {
+            out.add(BotSession.CAPABILITY_QUERY);
+        }
+        if (adminHandler != null) {
+            out.add(BotSession.CAPABILITY_ADMIN);
+        }
+        return List.copyOf(out);
+    }
+
+    /**
+     * 该 bot 客户端是否被允许发送 {@code admin.*}。
+     * <p>
+     * 判定链：管理接口已启用 → 客户端在 {@code bot.admin.clients} 白名单内（空列表表示不限制）。
+     */
+    private boolean adminAllowed(String clientId) {
+        if (adminHandler == null) {
+            return false;
+        }
+        List<String> whitelist = config.get().bot().admin().clients();
+        if (whitelist.isEmpty()) {
+            return true;
+        }
+        for (String allowed : whitelist) {
+            if (allowed.equalsIgnoreCase(clientId)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     @Override
@@ -93,6 +125,20 @@ public final class BotServer extends WebSocketServer {
             @Override
             public QueryResponse onQuery(String type, Map<String, Object> payload) {
                 return queryHandler == null ? null : queryHandler.handle(type, payload);
+            }
+
+            @Override
+            public QueryResponse onAdmin(String type, Map<String, Object> payload, String clientId,
+                                         String remoteIp) {
+                if (adminHandler == null || !adminAllowed(clientId)) {
+                    log.warn("拒绝未授权的 bot 管理请求：client_id={} type={}", clientId, type);
+                    return null;
+                }
+                if (!adminRateLimiter.tryAcquire("admin:" + clientId,
+                        config.get().bot().admin().rateLimitPerMinute(), java.time.Duration.ofMinutes(1))) {
+                    return QueryResponse.error("rate_limited", "管理操作过于频繁");
+                }
+                return adminHandler.handle(type, payload, clientId, remoteIp);
             }
 
             @Override

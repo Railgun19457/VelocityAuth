@@ -1,6 +1,7 @@
 package io.github.railgun19457.velocityauth.query;
 
 import io.github.railgun19457.velocityauth.auth.AccountCache;
+import io.github.railgun19457.velocityauth.storage.AccountRepository;
 import io.github.railgun19457.velocityauth.storage.StorageService;
 import io.github.railgun19457.velocityauth.storage.model.Account;
 import io.github.railgun19457.velocityauth.storage.model.Binding;
@@ -49,6 +50,25 @@ public final class AccountQueryService {
     }
 
     public record IdentityView(String kind, String identifier, long firstSeen, long lastSeen) {
+    }
+
+    /** 管理端账号摘要（列表行）。 */
+    public record AccountSummary(
+            long id,
+            String name,
+            UUID uuid,
+            String status,
+            String lastServer,
+            long createdAt,
+            Long lastLoginAt,
+            String lastIp,
+            String bindings,
+            boolean online
+    ) {
+    }
+
+    /** 分页结果。 */
+    public record Page<T>(List<T> items, int total, int page, int pageSize) {
     }
 
     // ------------------------------------------------------------------ 账号详情
@@ -160,6 +180,46 @@ public final class AccountQueryService {
         return storage.bindingHistory().lastReleaseAt(providerId, identifier.trim());
     }
 
+    // ------------------------------------------------------------------ 管理端检索
+
+    /**
+     * 分页检索账号（管理端列表）。在线状态由调用方通过 {@code onlineIds} 传入——
+     * 运行时状态不在库里，服务层不反向依赖会话注册表。
+     *
+     * @param page     页码（从 1 开始）
+     * @param pageSize 每页条数
+     * @param onlineIds 当前在线已认证的账号 id 集合
+     */
+    public Page<AccountSummary> search(AccountRepository.Search spec, int page, int pageSize,
+                                       Set<Long> onlineIds) {
+        int total = storage.accounts().countSearch(spec);
+        List<Account> accounts = total == 0 ? List.of() : storage.accounts().search(spec);
+        List<AccountSummary> rows = new ArrayList<>(accounts.size());
+        for (Account account : accounts) {
+            rows.add(summary(account, onlineIds));
+        }
+        return new Page<>(rows, total, page, pageSize);
+    }
+
+    private AccountSummary summary(Account account, Set<Long> onlineIds) {
+        List<Binding> bindings = storage.bindings().findByAccountId(account.id());
+        List<String> encoded = new ArrayList<>(bindings.size());
+        for (Binding binding : bindings) {
+            encoded.add(binding.type() + ":" + binding.identifier());
+        }
+        return new AccountSummary(
+                account.id(),
+                account.name(),
+                account.uuid(),
+                account.status().dbValue(),
+                account.lastServer(),
+                account.createdAt(),
+                account.lastLoginAt(),
+                account.lastIp(),
+                String.join(";", encoded),
+                onlineIds != null && onlineIds.contains(account.id()));
+    }
+
     // ------------------------------------------------------------------ 统计
 
     /** 聚合统计（无 PII）：账号 / 绑定 / 注册与登录时间窗。 */
@@ -190,6 +250,36 @@ public final class AccountQueryService {
                 storage.loginHistory().countByResultSince(LoginHistory.SUCCESS, now - day),
                 storage.loginHistory().countByResultSince(LoginHistory.SUCCESS, now - 7 * day),
                 storage.loginHistory().countByResultSince(LoginHistory.SUCCESS, now - 30 * day));
+    }
+
+    /**
+     * 活跃度统计：日活 / 周活 / 月活（按「当天有成功登录」去重账号数）+ 注册趋势。
+     *
+     * @param rangeDays 趋势天数（1-90），0 表示只返回聚合值不返回趋势
+     */
+    public Activity activity(int rangeDays) {
+        long now = System.currentTimeMillis() / 1000L;
+        long day = 86_400L;
+        int dau = storage.loginHistory().countDistinctAccountsSince(LoginHistory.SUCCESS, now - day);
+        int wau = storage.loginHistory().countDistinctAccountsSince(LoginHistory.SUCCESS, now - 7 * day);
+        int mau = storage.loginHistory().countDistinctAccountsSince(LoginHistory.SUCCESS, now - 30 * day);
+        List<DailyActivity> trend = List.of();
+        if (rangeDays > 0) {
+            List<DailyActivity> mapped = new ArrayList<>();
+            for (var entry : storage.loginHistory().dailySuccess(now - rangeDays * day)) {
+                mapped.add(new DailyActivity(entry.date(), entry.logins(), entry.accounts()));
+            }
+            trend = mapped;
+        }
+        return new Activity(dau, wau, mau, trend);
+    }
+
+    /** 活跃度视图。{@code trend} 按日期升序（UTC 分桶）。 */
+    public record Activity(int dau, int wau, int mau, List<DailyActivity> trend) {
+    }
+
+    /** 单日活跃度：成功登录次数与去重账号数。 */
+    public record DailyActivity(String date, int logins, int accounts) {
     }
 
     // ------------------------------------------------------------------ 内部

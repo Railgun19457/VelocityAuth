@@ -8,8 +8,10 @@ import com.velocitypowered.api.plugin.Dependency;
 import com.velocitypowered.api.plugin.Plugin;
 import com.velocitypowered.api.plugin.annotation.DataDirectory;
 import com.velocitypowered.api.proxy.ProxyServer;
+import io.github.railgun19457.velocityauth.admin.AdminService;
 import io.github.railgun19457.velocityauth.auth.AccountCache;
 import io.github.railgun19457.velocityauth.auth.AuthService;
+import io.github.railgun19457.velocityauth.auth.AuthSession;
 import io.github.railgun19457.velocityauth.auth.AuthSessionRegistry;
 import io.github.railgun19457.velocityauth.auth.BindingIndex;
 import io.github.railgun19457.velocityauth.auth.BindingService;
@@ -18,6 +20,8 @@ import io.github.railgun19457.velocityauth.auth.PendingBindingStore;
 import io.github.railgun19457.velocityauth.auth.RateLimiter;
 import io.github.railgun19457.velocityauth.auth.ReconnectService;
 import io.github.railgun19457.velocityauth.auth.RecoveryService;
+import io.github.railgun19457.velocityauth.bot.AccountAdminHandler;
+import io.github.railgun19457.velocityauth.bot.BotAdminHandler;
 import io.github.railgun19457.velocityauth.bot.BotQueryHandler;
 import io.github.railgun19457.velocityauth.bot.BotSocialGateway;
 import io.github.railgun19457.velocityauth.bot.AccountQueryHandler;
@@ -49,6 +53,7 @@ import org.slf4j.Logger;
 import java.io.IOException;
 import java.nio.file.Path;
 import java.time.Duration;
+import java.util.List;
 
 /**
  * VelocityAuth 主类：负责生命周期与组件装配。
@@ -87,6 +92,7 @@ public final class VelocityAuthPlugin {
     private FloodgateHook floodgate;
     private IdentityResolver identityResolver;
     private AccountQueryService queryService;
+    private io.github.railgun19457.velocityauth.admin.AdminService adminService;
 
     private RoutingListener routingListener;
 
@@ -144,8 +150,10 @@ public final class VelocityAuthPlugin {
                     smtpSender, emailTemplate, socialGateway, rateLimiter,
                     (task, delay) -> server.getScheduler().buildTask(this, task).delay(delay).schedule(),
                     async, log);
-            startBotServer();
             this.bindingService = new BindingService(this::config, storage, bindingIndex, async, log);
+            this.adminService = new AdminService(this::config, storage, authService, bindingService,
+                    sessionRegistry, task -> server.getScheduler().buildTask(this, task).schedule(), log);
+            startBotServer();
             this.recoveryService = new RecoveryService(storage, verificationService, async);
 
             registerListeners();
@@ -202,9 +210,14 @@ public final class VelocityAuthPlugin {
                     created.pairingId(), created.ttlSeconds());
         }
         BotQueryHandler queryHandler = settings.query().enabled()
-                ? new AccountQueryHandler(queryService, this::config,
+                ? new AccountQueryHandler(queryService, storage, this::config,
                         () -> sessionRegistry == null ? 0 : sessionRegistry.authenticatedSessions().size(),
-                        () -> botServer == null ? 0 : botServer.readyCount())
+                        () -> botServer == null ? 0 : botServer.readyCount(),
+                        () -> adminService == null ? java.util.Set.of() : adminService.onlineAccountIds(),
+                        this::onlineSessions)
+                : null;
+        BotAdminHandler adminHandler = settings.admin().enabled() && adminService != null
+                ? new AccountAdminHandler(adminService, this::config, log)
                 : null;
         this.botServer = new BotServer(settings, keyStore, pairingService, this::config, log,
                 new BotServer.Handler() {
@@ -218,7 +231,7 @@ public final class VelocityAuthPlugin {
                     public void onSessionReady(BotSession session) {
                         log.info("bot 会话就绪：client_id={} provider={}", session.clientId(), session.provider());
                     }
-                }, queryHandler);
+                }, queryHandler, adminHandler);
         try {
             this.botServer.start();
         } catch (RuntimeException e) {
@@ -349,6 +362,28 @@ public final class VelocityAuthPlugin {
     /** 玩家信息查询服务（bot 查询接口与 /vauth account info 共用）。 */
     public AccountQueryService queries() {
         return queryService;
+    }
+
+    /** 账号管理写操作（命令与 bot admin.* 共用）。 */
+    public io.github.railgun19457.velocityauth.admin.AdminService admin() {
+        return adminService;
+    }
+
+    /** 在线已认证会话（供 bot 管理页列表）。 */
+    private List<AccountQueryHandler.OnlineSession> onlineSessions() {
+        List<AccountQueryHandler.OnlineSession> out = new java.util.ArrayList<>();
+        if (sessionRegistry == null) {
+            return out;
+        }
+        for (AuthSession session : sessionRegistry.authenticatedSessions()) {
+            out.add(new AccountQueryHandler.OnlineSession(
+                    session.account() == null ? 0L : session.account().id(),
+                    session.account() == null ? "" : session.account().name(),
+                    session.connectionName(),
+                    session.ip(),
+                    session.authenticatedAt() / 1000L));
+        }
+        return out;
     }
 
     /** 路由监听器（已认证玩家的目标子服选择）。 */

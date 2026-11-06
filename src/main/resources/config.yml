@@ -96,6 +96,12 @@ bot:                                 # 平台无关的 bot 通道（原 qqbot）
   query:
     enabled: false                   # 玩家信息查询接口（query.*）；默认关闭。权限校验由 bot 侧负责
     max-results: 50                  # 单次查询返回的最大条数（列表 / 历史记录）
+  admin:                             # 账号管理写接口（admin.*）；默认关闭
+    enabled: false                   # 启用后插件在 capabilities 里声明 admin.v1
+    clients: []                      # 允许发送 admin.* 的 client_id 白名单；留空 = 允许所有已配对客户端
+    read-only: false                 # 只读模式：只放行查询类（query.*），拒绝一切 admin.* 写操作
+    max-page-size: 100               # 列表类接口单页最大条数
+    rate-limit-per-minute: 120       # 单个 bot 客户端每分钟最多发送多少条 admin.*
 
 proxy:
   address: ""                        # 代理对外地址，供 transferToHost 用；留空则用客户端连接时的地址

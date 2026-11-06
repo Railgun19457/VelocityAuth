@@ -19,7 +19,7 @@ import java.util.List;
 public final class Schema {
 
     /** 当前期望的 schema 版本。 */
-    public static final int CURRENT_VERSION = 4;
+    public static final int CURRENT_VERSION = 5;
 
     private Schema() {
     }
@@ -121,6 +121,7 @@ public final class Schema {
             case 2 -> loginHistoryStatements(dialect);
             case 3 -> bindingHistoryStatements(dialect);
             case 4 -> dropPremiumUuidStatements(dialect);
+            case 5 -> auditActorStatements(dialect);
             default -> throw new StorageException("缺少 v" + version + " 的迁移脚本");
         };
     }
@@ -308,6 +309,25 @@ public final class Schema {
                     + " ON binding_history (type, identifier, at)");
             out.add("CREATE INDEX IF NOT EXISTS idx_binding_history_account"
                     + " ON binding_history (account_id, at)");
+        }
+        return out;
+    }
+
+    /**
+     * v5：审计日志增加操作者与来源（{@code actor} / {@code source} / {@code client_id}）。
+     * <p>
+     * 用于区分「玩家自己操作」与「管理员经命令 / bot 管理页操作」，并能在出问题时追溯是哪个
+     * bot 客户端、哪个操作者发起的。历史记录这些列为 {@code NULL}（视为插件内部动作）。
+     */
+    private static List<String> auditActorStatements(Dialect dialect) {
+        List<String> out = new ArrayList<>();
+        out.add("ALTER TABLE audit_log ADD COLUMN actor VARCHAR(128) NULL");
+        out.add("ALTER TABLE audit_log ADD COLUMN source VARCHAR(16) NULL");
+        out.add("ALTER TABLE audit_log ADD COLUMN client_id VARCHAR(64) NULL");
+        if (dialect == Dialect.MYSQL) {
+            out.add("ALTER TABLE audit_log ADD KEY idx_audit_log_actor (actor, at)");
+        } else {
+            out.add("CREATE INDEX IF NOT EXISTS idx_audit_log_actor ON audit_log (actor, at)");
         }
         return out;
     }

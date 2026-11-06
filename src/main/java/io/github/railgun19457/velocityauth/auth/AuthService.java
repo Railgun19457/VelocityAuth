@@ -2,6 +2,7 @@ package io.github.railgun19457.velocityauth.auth;
 
 import io.github.railgun19457.velocityauth.config.VelocityAuthConfig;
 import io.github.railgun19457.velocityauth.platform.FloodgateHook;
+import io.github.railgun19457.velocityauth.storage.AuditContext;
 import io.github.railgun19457.velocityauth.storage.StorageService;
 import io.github.railgun19457.velocityauth.storage.model.Account;
 import io.github.railgun19457.velocityauth.storage.model.AccountStatus;
@@ -298,17 +299,48 @@ public final class AuthService {
      * @return 是否确实删除了账号
      */
     public CompletableFuture<Boolean> deleteAccount(long accountId, String ip, String action, String detail) {
+        return deleteAccount(accountId, ip, action, detail, AuditContext.plugin());
+    }
+
+    /**
+     * 删除账号（级联删除身份 / 绑定 / 会话），并同步清理内存索引。
+     *
+     * @param audit 审计上下文（谁删的、来自哪里）
+     */
+    public CompletableFuture<Boolean> deleteAccount(long accountId, String ip, String action, String detail,
+                                                    AuditContext audit) {
         return async.supply(() -> {
             try {
                 recordBindingRelease(accountId, ip, BindingHistory.DELETE);
                 int removed = storage.accounts().delete(accountId);
                 if (removed > 0) {
                     forgetAccount(accountId);
-                    storage.audit().log(nowSeconds(), null, action, ip, detail);
+                    storage.audit().log(nowSeconds(), null, action, ip, detail,
+                            audit.actor(), audit.source(), audit.clientId());
                 }
                 return removed > 0;
             } catch (RuntimeException e) {
                 log.error("删除账号失败：" + e.getMessage(), e);
+                return false;
+            }
+        });
+    }
+
+    /** 修改账号状态并写审计（管理端锁定 / 解锁共用）。 */
+    public CompletableFuture<Boolean> setStatus(long accountId, AccountStatus status, String ip,
+                                                String action, AuditContext audit) {
+        return async.supply(() -> {
+            try {
+                int updated = storage.accounts().updateStatusReturning(accountId, status);
+                if (updated <= 0) {
+                    return false;
+                }
+                storage.accounts().findById(accountId).ifPresent(cache::put);
+                storage.audit().log(nowSeconds(), accountId, action, ip, null,
+                        audit.actor(), audit.source(), audit.clientId());
+                return true;
+            } catch (RuntimeException e) {
+                log.error("更新账号状态失败：" + e.getMessage(), e);
                 return false;
             }
         });
@@ -394,6 +426,17 @@ public final class AuthService {
     /** 管理员 / 找回流程直接设置新密码（不校验旧密码）。 */
     public CompletableFuture<AuthOutcomes.ChangePassword> forcePassword(long accountId, String newPassword,
                                                                        String ip, String action) {
+        return forcePassword(accountId, newPassword, ip, action, AuditContext.plugin());
+    }
+
+    /**
+     * 管理员 / 找回流程直接设置新密码（不校验旧密码），并记录审计上下文。
+     *
+     * @param action 审计动作标识（{@code change_password} / {@code admin_reset_password} 等）
+     */
+    public CompletableFuture<AuthOutcomes.ChangePassword> forcePassword(long accountId, String newPassword,
+                                                                       String ip, String action,
+                                                                       AuditContext audit) {
         return async.supply(() -> {
             try {
                 Account account = storage.accounts().findById(accountId).orElse(null);
@@ -409,7 +452,8 @@ public final class AuthService {
                 }
                 storage.accounts().updatePasswordHash(accountId, hasher.hash(newPassword));
                 storage.accounts().findById(accountId).ifPresent(cache::put);
-                storage.audit().log(nowSeconds(), accountId, action, ip, null);
+                storage.audit().log(nowSeconds(), accountId, action, ip, null,
+                        audit.actor(), audit.source(), audit.clientId());
                 return new AuthOutcomes.ChangePassword(AuthOutcomes.ChangePasswordStatus.SUCCESS);
             } catch (RuntimeException e) {
                 log.error("重置密码失败：" + e.getMessage(), e);

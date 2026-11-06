@@ -1,5 +1,6 @@
 package io.github.railgun19457.velocityauth.storage;
 
+import io.github.railgun19457.velocityauth.storage.Database.Dialect;
 import io.github.railgun19457.velocityauth.storage.model.LoginHistory;
 
 import java.sql.PreparedStatement;
@@ -144,6 +145,62 @@ public final class LoginHistoryRepository {
                 }
             }
         });
+    }
+
+    /**
+     * 某结果在某时间窗内去重后的账号数（DAU / WAU / MAU）。
+     *
+     * @param result 结果（{@code null} 表示不过滤）
+     * @param since  起始时间（unix 秒）
+     */
+    public int countDistinctAccountsSince(String result, long since) {
+        return database.withConnection(connection -> {
+            String sql = "SELECT COUNT(DISTINCT account_id) FROM login_history"
+                    + " WHERE at >= ? AND account_id IS NOT NULL"
+                    + (result == null ? "" : " AND result = ?");
+            try (PreparedStatement ps = connection.prepareStatement(sql)) {
+                ps.setLong(1, since);
+                if (result != null) {
+                    ps.setString(2, result);
+                }
+                try (ResultSet rs = ps.executeQuery()) {
+                    return rs.next() ? rs.getInt(1) : 0;
+                }
+            }
+        });
+    }
+
+    /**
+     * 按天聚合成功登录（趋势图用）。日期按 **UTC** 分桶，返回按日期升序。
+     *
+     * @param since 起始时间（unix 秒）
+     */
+    public List<DailyActivity> dailySuccess(long since) {
+        return database.withConnection(connection -> {
+            String dayExpr = database.dialect() == Dialect.MYSQL
+                    ? "DATE_FORMAT(FROM_UNIXTIME(at), '%Y-%m-%d')"
+                    : "strftime('%Y-%m-%d', at, 'unixepoch')";
+            try (PreparedStatement ps = connection.prepareStatement(
+                    "SELECT " + dayExpr + " AS day, COUNT(*) AS logins,"
+                            + " COUNT(DISTINCT account_id) AS accounts"
+                            + " FROM login_history WHERE result = ? AND at >= ?"
+                            + " GROUP BY " + dayExpr + " ORDER BY day")) {
+                ps.setString(1, LoginHistory.SUCCESS);
+                ps.setLong(2, since);
+                try (ResultSet rs = ps.executeQuery()) {
+                    List<DailyActivity> out = new ArrayList<>();
+                    while (rs.next()) {
+                        out.add(new DailyActivity(rs.getString("day"), rs.getInt("logins"),
+                                rs.getInt("accounts")));
+                    }
+                    return out;
+                }
+            }
+        });
+    }
+
+    /** 某天的成功登录聚合。 */
+    public record DailyActivity(String date, int logins, int accounts) {
     }
 
     private static String truncate(String value, int max) {

@@ -216,7 +216,12 @@ final class TestBotClient extends WebSocketClient {
                     matchedAck.complete("true".equals(String.valueOf(message.payload().get("consumed"))));
             case "verify.cancel" -> logs.add("cancelled " + message.payload().get("code"));
             case "query.account.result", "query.lookup.result", "query.history.result",
-                    "query.binding-history.result", "query.stats.result" -> completeQuery(queryResults, message);
+                    "query.binding-history.result", "query.stats.result",
+                    "query.accounts.list.result", "query.sessions.list.result", "query.audit.list.result",
+                    "admin.account.set-status.result", "admin.account.reset-password.result",
+                    "admin.account.delete.result", "admin.account.kick.result",
+                    "admin.account.clear-session.result", "admin.binding.remove.result" ->
+                    completeQuery(queryResults, message);
             case "error" -> {
                 if (!completeQuery(queryErrors, message)) {
                     logs.add("error " + message.payload().get("code"));

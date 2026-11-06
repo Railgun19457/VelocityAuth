@@ -40,6 +40,7 @@ public final class BotSession {
 
     public static final String CAPABILITY_VERIFY = "verify.v1";
     public static final String CAPABILITY_QUERY = "query.v1";
+    public static final String CAPABILITY_ADMIN = "admin.v1";
 
     private final WebSocket connection;
     private final KeyStore keyStore;
@@ -103,6 +104,17 @@ public final class BotSession {
 
         /** 处理一条 {@code query.*} 业务消息；返回 {@code null} 表示查询接口未启用。 */
         default QueryResponse onQuery(String type, Map<String, Object> payload) {
+            return null;
+        }
+
+        /**
+         * 处理一条 {@code admin.*} 管理消息；返回 {@code null} 表示管理接口未启用，
+         * 或该客户端未被授权（两者对 bot 都表现为 {@code admin_disabled}）。
+         *
+         * @param clientId 发起请求的已配对客户端 id
+         * @param remoteIp bot 连接的远端地址（仅用于审计）
+         */
+        default QueryResponse onAdmin(String type, Map<String, Object> payload, String clientId, String remoteIp) {
             return null;
         }
 
@@ -468,8 +480,12 @@ public final class BotSession {
             case "verify.watch.ack" -> log.debug("bot 已登记验证码：accepted={}",
                     message.payload().get("accepted"));
             case "verify.matched" -> handleVerifyMatched(message);
-            case "query.account", "query.lookup", "query.history", "query.binding-history", "query.stats" ->
+            case "query.account", "query.lookup", "query.history", "query.binding-history", "query.stats",
+                    "query.accounts.list", "query.sessions.list", "query.audit.list" ->
                     handleQuery(message);
+            case "admin.account.set-status", "admin.account.reset-password", "admin.account.delete",
+                    "admin.account.kick", "admin.account.clear-session", "admin.binding.remove" ->
+                    handleAdmin(message);
             case "error" -> log.warn("bot 报告错误：{} {}",
                     message.payload().get("code"), message.payload().get("message"));
             default -> log.debug("忽略未知业务消息：{}", message.type());
@@ -500,6 +516,21 @@ public final class BotSession {
                     "request_id", message.id()));
             return;
         }
+        respond(message, response);
+    }
+
+    private void handleAdmin(Transcript.ParsedMessage message) {
+        QueryResponse response = callbacks.onAdmin(message.type(), message.payload(), clientId, remoteAddress());
+        if (response == null) {
+            sendSealed("error", Map.of("code", "admin_disabled", "message", "管理接口未启用或该客户端未获授权",
+                    "request_id", message.id()));
+            return;
+        }
+        respond(message, response);
+    }
+
+    /** 统一把 {@link QueryResponse} 回写为 {@code <type>.result} 或密封 {@code error}。 */
+    private void respond(Transcript.ParsedMessage message, QueryResponse response) {
         if (response.isError()) {
             sendSealed("error", Map.of("code", response.errorCode(),
                     "message", response.errorMessage() == null ? "" : response.errorMessage(),

@@ -10,6 +10,7 @@ import io.github.railgun19457.velocityauth.auth.Provider;
 import io.github.railgun19457.velocityauth.bot.KeyStore;
 import io.github.railgun19457.velocityauth.bot.PairingService;
 import io.github.railgun19457.velocityauth.query.AccountQueryService;
+import io.github.railgun19457.velocityauth.storage.AuditContext;
 import io.github.railgun19457.velocityauth.storage.model.Account;
 import io.github.railgun19457.velocityauth.storage.model.AccountStatus;
 import io.github.railgun19457.velocityauth.storage.model.AuditEntry;
@@ -144,7 +145,8 @@ public final class AdminCommand implements SimpleCommand {
                     usage(source);
                     return;
                 }
-                plugin.authService().forcePassword(account.id(), args[3], ip, AuditEntry.CHANGE_PASSWORD)
+                plugin.authService().forcePassword(account.id(), args[3], ip, AuditEntry.CHANGE_PASSWORD,
+                                AuditContext.command(sourceName(source)))
                         .thenAccept(result -> source.sendMessage(switch (result.status()) {
                             case SUCCESS -> plugin.lang().msg("admin.account.password-set",
                                     "account", account.name());
@@ -169,37 +171,25 @@ public final class AdminCommand implements SimpleCommand {
                     usage(source);
                     return;
                 }
-                plugin.bindings().unbind(account, providerId, ip).thenAccept(outcome ->
+                plugin.bindings().unbind(account, providerId, ip, AuditEntry.UNBIND,
+                                AuditContext.command(sourceName(source)))
+                        .thenAccept(outcome ->
                         source.sendMessage(outcome.ok()
                                 ? plugin.lang().msg("admin.account.unbound", "account", account.name(),
-                                "type", providerId)
+                                 "type", providerId)
                                 : plugin.lang().msg("command.unbind.not-bound")));
             }
             case "lock", "unlock" -> {
                 boolean lock = action.equals("lock");
-                plugin.async().run(() -> {
-                    plugin.storage().accounts().updateStatus(account.id(),
-                            lock ? AccountStatus.LOCKED : AccountStatus.ACTIVE);
-                    plugin.storage().accounts().findById(account.id())
-                            .ifPresent(updated -> plugin.authService().cache().put(updated));
-                    plugin.storage().audit().log(
-                            io.github.railgun19457.velocityauth.auth.AuthService.nowSeconds(), account.id(),
-                            lock ? "admin_lock" : "admin_unlock", ip, "by=" + sourceName(source));
-                    source.sendMessage(lock
-                            ? plugin.lang().msg("admin.account.locked", "account", account.name())
-                            : plugin.lang().msg("admin.account.unlocked", "account", account.name()));
-                });
-                if (lock) {
-                    kickAccount(account, "账号已被锁定");
-                }
+                plugin.admin().setStatus(account, lock ? AccountStatus.LOCKED : AccountStatus.ACTIVE, ip,
+                        AuditContext.command(sourceName(source)));
+                source.sendMessage(lock
+                        ? plugin.lang().msg("admin.account.locked", "account", account.name())
+                        : plugin.lang().msg("admin.account.unlocked", "account", account.name()));
             }
             case "delete" -> {
-                long accountId = account.id();
-                String detail = "account=" + account.name() + " by=" + sourceName(source);
-                plugin.authService().deleteAccount(accountId, ip, "admin_delete", detail)
-                        .thenAccept(removed -> source.sendMessage(
-                                plugin.lang().msg("admin.account.deleted", "account", account.name())));
-                kickAccount(account, "账号已被删除");
+                plugin.admin().delete(account, ip, AuditContext.command(sourceName(source)));
+                source.sendMessage(plugin.lang().msg("admin.account.deleted", "account", account.name()));
             }
             default -> usage(source);
         }
@@ -272,15 +262,7 @@ public final class AdminCommand implements SimpleCommand {
     }
 
     private int kickAccount(Account account, String reason) {
-        int count = 0;
-        for (AuthSession session : plugin.sessionRegistry().sessionsOfAccount(account.id())) {
-            Player player = session.player();
-            if (player != null) {
-                player.disconnect(Component.text(reason));
-                count++;
-            }
-        }
-        return count;
+        return plugin.admin().kick(account, reason, "console", AuditContext.command("console"));
     }
 
     // ------------------------------------------------------------------ forcelogin
@@ -320,7 +302,8 @@ public final class AdminCommand implements SimpleCommand {
         plugin.async().run(() -> plugin.storage().audit().log(
                 io.github.railgun19457.velocityauth.auth.AuthService.nowSeconds(), target.id(),
                 AuditEntry.FORCELOGIN, Addresses.ipOf(player),
-                "by=" + player.getUsername() + " kick=" + kickExisting));
+                "by=" + player.getUsername() + " kick=" + kickExisting,
+                player.getUsername(), AuditEntry.SOURCE_COMMAND, null));
         source.sendMessage(plugin.lang().msg("admin.forcelogin.success"));
         plugin.reconnectService().reconnect(player, plugin.lang().msg("auth.login-disconnect"));
     }

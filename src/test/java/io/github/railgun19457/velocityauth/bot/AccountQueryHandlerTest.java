@@ -34,6 +34,7 @@ class AccountQueryHandlerTest {
 
     private StorageService storage;
     private AccountQueryHandler handler;
+    private long accountId;
 
     @BeforeEach
     void setUp() throws Exception {
@@ -43,15 +44,16 @@ class AccountQueryHandlerTest {
                 new VelocityAuthConfig.Sqlite("handler.db"),
                 new VelocityAuthConfig.Mysql("127.0.0.1", 3306, "x", "root", ""), 90, 90, 90), tempDir, NOPLogger.NOP_LOGGER);
         long now = System.currentTimeMillis() / 1000L;
-        long accountId = storage.createAccount("Alice", "alice", UUID.randomUUID(), "h", AccountStatus.ACTIVE,
+        long createdId = storage.createAccount("Alice", "alice", UUID.randomUUID(), "h", AccountStatus.ACTIVE,
                 now - 3600L, IdentityKind.JAVA, "alice", Map.of("email", "alice@qq.com", "qq", "10001"));
-        storage.accounts().updateLastLogin(accountId, now - 600L, "1.2.3.4");
-        storage.loginHistory().insert(accountId, now - 600L, "1.2.3.4", LoginHistory.SUCCESS, "alice", null);
-        storage.loginHistory().insert(accountId, 400L, "1.2.3.4", LoginHistory.FAILED, "alice",
+        this.accountId = createdId;
+        storage.accounts().updateLastLogin(createdId, now - 600L, "1.2.3.4");
+        storage.loginHistory().insert(createdId, now - 600L, "1.2.3.4", LoginHistory.SUCCESS, "alice", null);
+        storage.loginHistory().insert(createdId, 400L, "1.2.3.4", LoginHistory.FAILED, "alice",
                 "reason=wrong_password");
-        storage.bindingHistory().insert(accountId, "email", "alice@qq.com",
+        storage.bindingHistory().insert(createdId, "email", "alice@qq.com",
                 BindingHistory.BIND, 100L, "1.2.3.4");
-        storage.bindingHistory().insert(accountId, "email", "alice@qq.com",
+        storage.bindingHistory().insert(createdId, "email", "alice@qq.com",
                 BindingHistory.UNBIND, now - 600L, "1.2.3.4");
         AccountCache cache = new AccountCache(storage.accounts(), storage.identities(), log);
         cache.load();
@@ -61,7 +63,8 @@ class AccountQueryHandlerTest {
                         "email", Map.of("cooldown-minutes", 60),
                         "social", Map.of("qq", Map.of("cooldown-minutes", 60))),
                 "bot", Map.of("query", Map.of("enabled", true, "max-results", 5)))));
-        handler = new AccountQueryHandler(queries, () -> config, () -> 3, () -> 1);
+        handler = new AccountQueryHandler(queries, storage, () -> config, () -> 3, () -> 1,
+                () -> java.util.Set.of(createdId), java.util.List::of);
     }
 
     @AfterEach
@@ -143,5 +146,86 @@ class AccountQueryHandlerTest {
         assertEquals(1, payload.get("bot_connected"));
         assertEquals(1, payload.get("registered_30d"));
         assertEquals(1, payload.get("logins_30d"));
+        // 活跃度：24h 内有 1 次成功登录 → dau=1
+        assertEquals(1, payload.get("dau"));
+        assertEquals(1, payload.get("wau"));
+        assertEquals(1, payload.get("mau"));
+        // 未指定 range 时不返回趋势，保持旧响应兼容
+        assertNull(payload.get("trend"));
+    }
+
+    @Test
+    void statsWithRangeReturnsTrend() {
+        QueryResponse response = handler.handle("query.stats", Map.of("range", 7));
+        assertNull(response.errorCode());
+        String trend = (String) response.payload().get("trend");
+        assertTrue(trend.startsWith("["), trend);
+        assertTrue(trend.contains("\"accounts\":1"), trend);
+    }
+
+    @Test
+    void accountsListFiltersAndPages() {
+        QueryResponse response = handler.handle("query.accounts.list",
+                Map.of("keyword", "ali", "limit", 10));
+        assertNull(response.errorCode());
+        Map<String, Object> payload = response.payload();
+        assertEquals(1, payload.get("total"));
+        assertEquals(1, payload.get("count"));
+        String data = (String) payload.get("data");
+        assertTrue(data.contains("\"name\":\"Alice\""), data);
+        assertTrue(data.contains("\"online\":true"), data);
+    }
+
+    @Test
+    void accountsListRejectsUnknownStatus() {
+        QueryResponse response = handler.handle("query.accounts.list", Map.of("status", "bogus"));
+        assertEquals("bad_request", response.errorCode());
+    }
+
+    @Test
+    void auditListReturnsEntries() {
+        storage.audit().log(1000L, accountId, "admin_lock", "9.9.9.9", "reason=test",
+                "admin", "bot", "bot-1");
+        QueryResponse response = handler.handle("query.audit.list",
+                Map.of("account_id", accountId, "limit", 10));
+        assertNull(response.errorCode());
+        Map<String, Object> payload = response.payload();
+        assertEquals(1, payload.get("total"));
+        String data = (String) payload.get("data");
+        assertTrue(data.contains("\"action\":\"admin_lock\""), data);
+        assertTrue(data.contains("\"actor\":\"admin\""), data);
+        assertTrue(data.contains("\"client_id\":\"bot-1\""), data);
+    }
+
+    @Test
+    void auditListRejectsUnknownSource() {
+        QueryResponse response = handler.handle("query.audit.list", Map.of("source", "weird"));
+        assertEquals("bad_request", response.errorCode());
+    }
+
+    @Test
+    void sessionsListReturnsRows() {
+        QueryResponse response = handler.handle("query.sessions.list", Map.of());
+        assertNull(response.errorCode());
+        assertEquals(0, response.payload().get("total"));
+    }
+
+    @Test
+    void accountDetailCarriesOnlineAndStructuredData() {
+        QueryResponse response = handler.handle("query.account", Map.of("by", "name", "value", "alice"));
+        assertNull(response.errorCode());
+        assertEquals(true, response.payload().get("online"));
+        String data = (String) response.payload().get("data");
+        assertTrue(data.contains("\"provider\":\"email\""), data);
+        assertTrue(data.contains("\"kind\":\"java\""), data);
+    }
+
+    @Test
+    void historyCarriesFailureDetail() {
+        QueryResponse response = handler.handle("query.history",
+                Map.of("by", "name", "value", "alice", "result", "failed"));
+        assertNull(response.errorCode());
+        String data = (String) response.payload().get("data");
+        assertTrue(data.contains("reason=wrong_password"), data);
     }
 }

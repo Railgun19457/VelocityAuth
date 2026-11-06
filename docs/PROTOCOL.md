@@ -346,11 +346,24 @@ ts=<时间戳>\n
 | `query.lookup` | bot → plugin | `by`(string), `value`(string), `limit`(int, 可选) | 按 `ip` 或渠道 id 反查账号名列表（`query.v1`） |
 | `query.lookup.result` | plugin → bot | `found`, `by`, `value`, `count`(int), `accounts`(string, `,` 分隔) | 命中的账号名（去重） |
 | `query.history` | bot → plugin | `by`(string), `value`(string), `result`(string, 可选), `since`(int, 可选), `limit`(int, 可选) | 按 `name`\|`uuid` 查询登录历史（`query.v1`） |
-| `query.history.result` | plugin → bot | `found`, `count`(int), `entries`(string, `;` 分隔) | 每条 `at\|result\|ip\|identity`，时间倒序 |
+| `query.history.result` | plugin → bot | `found`, `count`(int), `entries`(string, `;` 分隔), `data` | 每条 `at\|result\|ip\|identity`，时间倒序 |
 | `query.binding-history` | bot → plugin | `by`(string), `value`(string), `limit`(int, 可选) | 按渠道 id 查绑定历史（含解绑/注销）（`query.v1`） |
 | `query.binding-history.result` | plugin → bot | `found`, `by`, `value`, `count`(int), `entries`(string, `;` 分隔), `cooldown_until`(int) | 每条 `at\|action\|ip\|account_id\|account`，时间倒序 |
-| `query.stats` | bot → plugin | — | 聚合统计（`query.v1`） |
-| `query.stats.result` | plugin → bot | 见 8.1 | 账号 / 绑定 / 在线 / 时间窗统计 |
+| `query.stats` | bot → plugin | `range`(int, 可选，1-90) | 聚合统计 + 活跃度（`query.v1`） |
+| `query.stats.result` | plugin → bot | 见 8.1 | 账号 / 绑定 / 在线 / 时间窗统计 + `dau`/`wau`/`mau`（带 `range` 时另有 `trend`） |
+| `query.accounts.list` | bot → plugin | `keyword`, `status`, `provider`, `identifier`, `online`, `created_after`, `created_before`, `last_login_after`, `last_login_before`, `sort`, `page`, `limit` | 管理端账号检索（`query.v1`，见 8.3） |
+| `query.accounts.list.result` | plugin → bot | `found`, `total`, `page`, `page_size`, `count`, `data` | 分页账号摘要 |
+| `query.sessions.list` | bot → plugin | `page`, `limit` | 在线已认证会话列表（`query.v1`，见 8.3） |
+| `query.sessions.list.result` | plugin → bot | `found`, `total`, `page`, `page_size`, `count`, `data` | 在线会话 |
+| `query.audit.list` | bot → plugin | `account_id`, `action`, `actor`, `source`, `since`, `until`, `page`, `limit` | 审计日志检索（`query.v1`，见 8.3） |
+| `query.audit.list.result` | plugin → bot | `found`, `total`, `page`, `page_size`, `count`, `data` | 分页审计记录 |
+| `admin.account.set-status` | bot → plugin | `id` 或 `name`, `status`(`active`\|`locked`), `actor`(可选) | 锁定 / 解锁（`admin.v1`，见 8.4） |
+| `admin.account.reset-password` | bot → plugin | `id` 或 `name`, `password`, `actor`(可选) | 管理员重置密码 |
+| `admin.account.delete` | bot → plugin | `id` 或 `name`, `confirm_name`, `actor`(可选) | 删除账号（必须回填账号名确认） |
+| `admin.account.kick` | bot → plugin | `id` 或 `name`, `reason`(可选), `actor`(可选) | 踢出在线会话 |
+| `admin.account.clear-session` | bot → plugin | `id` 或 `name`, `actor`(可选) | 清除会话保持 |
+| `admin.binding.remove` | bot → plugin | `id` 或 `name`, `provider`, `actor`(可选) | 解绑指定渠道 |
+| `admin.*.result` | plugin → bot | `ok`(bool), `id`, `name`, 其它按操作 | 管理操作结果 |
 | `ping` | 双向 | — | 心跳 |
 | `pong` | 双向 | — | 心跳应答 |
 | `error` | 双向 | `code`(string), `message`(string), `request_id`(string, 可选) | 错误；握手阶段为明文帧 |
@@ -378,6 +391,9 @@ plugin → bot   verify.matched.ack { code:"MC-8F3K2A", consumed:true }
 
 > 字段编码见第 8 节开头：值在接收方都是字符串。`accounts` / `identities` 用 `,` 连接、
 > `entries` 用 `;` 连接（各分量本身不含分隔符）。
+>
+> 从 v1.1 起，列表 / 详情类响应额外提供 `data` 字段（**紧凑 JSON 字符串**），
+> 便于管理页直接解析；原有扁平字段保持不变，向后兼容。
 
 `query.account`（`by` = `name` \| `uuid`）→ `query.account.result`：
 
@@ -406,7 +422,7 @@ plugin → bot   verify.matched.ack { code:"MC-8F3K2A", consumed:true }
 另附 `cooldown_until`(int)：该标识可再次绑定的时间点（unix 秒，0 表示无冷却/已可绑定）。
 即使账号已解绑或注销，这里仍能查到它曾绑定的 QQ / 邮箱。
 
-`query.stats`（无参数）→ `query.stats.result`：聚合统计（**无 PII**，只给数字）：
+`query.stats`（`range` 可选，1-90 天）→ `query.stats.result`：聚合统计（**无 PII**，只给数字）：
 
 | 字段 | 含义 |
 |---|---|
@@ -417,8 +433,83 @@ plugin → bot   verify.matched.ack { code:"MC-8F3K2A", consumed:true }
 | `bot_connected` | 已就绪的 bot 会话数 |
 | `registered_24h` / `registered_7d` / `registered_30d` | 近窗口注册数 |
 | `logins_24h` / `logins_7d` / `logins_30d` | 近窗口**成功**登录数 |
+| `dau` / `wau` / `mau` | 近 24h / 7d / 30d 有成功登录的去重账号数（见 8.4） |
+| `trend` | 仅在带 `range` 时出现：JSON 字符串，每日 `date`/`logins`/`accounts` |
 
 > 查询接口只读；**永不返回密码哈希**。
+
+### 8.2 账号管理（`admin.v1`）
+
+**默认关闭**，由 `bot.admin.enabled` 控制；启用后 plugin 在 capabilities 里声明 `admin.v1`。
+
+| 配置 | 说明 |
+|---|---|
+| `bot.admin.clients` | 允许发送 `admin.*` 的 `client_id` 白名单；空列表表示允许所有已配对客户端 |
+| `bot.admin.read-only` | 只读模式：拒绝一切写操作（返回 `admin_read_only`） |
+| `bot.admin.max-page-size` | 列表类接口单页最大条数 |
+| `bot.admin.rate-limit-per-minute` | 单个客户端每分钟最多发送多少条 `admin.*` |
+
+**授权模型**：插件只认「已配对 + 已就绪 + 客户端在白名单内」。`actor` 字段由 bot 传回，**仅用于审计追溯，不参与鉴权**——管理页自身的登录与权限由 bot 后端负责。
+
+| 消息 | payload 字段 | 说明 |
+|---|---|---|
+| `admin.account.set-status` | `id` 或 `name`, `status`(`active`\|`locked`), `actor`(可选) | 锁定 / 解锁；锁定时同时踢出在线会话 |
+| `admin.account.reset-password` | `id` 或 `name`, `password`, `actor`(可选) | 不校验旧密码 |
+| `admin.account.delete` | `id` 或 `name`, `confirm_name`, `actor`(可选) | `confirm_name` 必须与账号名一致（不区分大小写） |
+| `admin.account.kick` | `id` 或 `name`, `reason`(可选), `actor`(可选) | 踢出该账号的全部在线会话 |
+| `admin.account.clear-session` | `id` 或 `name`, `actor`(可选) | 清除会话保持，下次必须重新输入密码 |
+| `admin.binding.remove` | `id` 或 `name`, `provider`, `actor`(可选) | 解绑；若会破坏 `registration.require-binding` 则返回 `binding_required` |
+
+成功时回 `<type>.result`：`ok`(true)、`id`、`name`，另按操作附带 `status` / `sessions` / `deleted`。
+失败时回密封 `error`，`code` ∈ `admin_disabled` | `admin_read_only` | `rate_limited` | `confirm_required` |
+`binding_required` | `not_bound` | `password_too_short` | `password_too_long` | `bad_request` | `internal_error`。
+
+**审计**：所有写操作都会写入 `audit_log`，`action` 为 `admin_lock` / `admin_unlock` /
+`admin_reset_password` / `admin_delete` / `admin_unbind` / `admin_kick` / `admin_clear_session`，
+`source=bot`，`client_id` 为发起请求的客户端，`actor` 取自 payload。
+
+### 8.3 管理端检索（`query.v1` 扩展）
+
+三个列表接口的响应都带 `data` 字段（紧凑 JSON 字符串），由 bot 侧 `JSON.parse` 使用。
+
+**`query.accounts.list`**（全部参数可选）
+
+| 参数 | 说明 |
+|---|---|
+| `keyword` | 模糊匹配账号名、UUID、最近登录 IP、绑定标识 |
+| `status` | `active` \| `locked` \| `pending_binding` |
+| `provider` / `identifier` | 按绑定渠道（及可选的具体标识）筛选 |
+| `online` | `true` 只返回当前在线账号 |
+| `created_after` / `created_before` | 注册时间范围（unix 秒） |
+| `last_login_after` / `last_login_before` | 最后登录时间范围（unix 秒） |
+| `sort` | `name`(默认) \| `created_at` \| `-created_at` \| `last_login_at` \| `-last_login_at` \| `id` \| `-id` |
+| `page` / `limit` | 页码（从 1 开始）/ 每页条数（上限 `max-page-size`） |
+
+`data` 每行：`id`, `name`, `uuid`, `status`, `last_server`, `created_at`, `last_login_at`,
+`last_ip`, `bindings`（`provider:identifier;...`）, `online`。
+
+**`query.sessions.list`**（`page`, `limit`）：`data` 每行 `account_id`, `account`, `connection`,
+`ip`, `authenticated_at`。
+
+**`query.audit.list`**：`account_id`, `action`, `actor`, `source`(`bot`\|`command`\|`plugin`),
+`since`, `until`, `page`, `limit`。
+`data` 每行：`id`, `at`, `account_id`, `account`, `action`, `ip`, `detail`, `actor`, `source`, `client_id`。
+
+### 8.4 活跃度（`query.stats` 扩展）
+
+`query.stats` 新增可选参数 `range`（1-90 天）。响应始终包含：
+
+| 字段 | 含义 |
+|---|---|
+| `dau` | 近 24 小时有成功登录的去重账号数 |
+| `wau` | 近 7 天 |
+| `mau` | 近 30 天 |
+
+带 `range` 时另附 `trend`（JSON 字符串，按日期升序的数组），每项 `date`（UTC `YYYY-MM-DD`）、
+`logins`（成功登录次数）、`accounts`（去重账号数）。
+
+> 口径是「当天有重新登录」。走会话保持（免密）一直在线、当天未重新登录的玩家不计入。
+> 数据受 `database.login-history-days`（默认 90 天）保留期限制；长期趋势请由 bot 侧缓存。
 
 ---
 
@@ -435,11 +526,17 @@ plugin → bot   verify.matched.ack { code:"MC-8F3K2A", consumed:true }
 | `decrypt_failed` | 密封帧解密失败 / 未完成握手即收到密封帧 |
 | `replay_detected` | `seq` 重放 |
 | `query_disabled` | 收到 `query.*` 但查询接口未启用 |
-| `bad_request` | `query.*` 参数非法（`by`/`value`/`result` 等） |
+| `admin_disabled` | 收到 `admin.*` 但管理接口未启用，或该客户端未被授权 |
+| `admin_read_only` | 管理接口处于只读模式（`bot.admin.read-only=true`） |
+| `confirm_required` | 危险操作缺少/不匹配 `confirm_name` |
+| `binding_required` | 解绑会破坏「注册后必须绑定」的要求 |
+| `not_bound` | 解绑时该渠道未绑定 |
+| `rate_limited` | `admin.*` 超过 `bot.admin.rate-limit-per-minute` |
+| `bad_request` | `query.*` / `admin.*` 参数非法（`by`/`value`/`result` 等） |
 | `internal_error` | 其它（状态异常、未知帧、期望类型不符等） |
 
-> `rate_limited` 为**保留码**，当前插件实现未产生（限流在命令层处理）。握手阶段的
-> `error` 为**明文帧**（第 4.3 节），业务 / 查询阶段的 `error` 为**密封帧**并回带 `request_id`。
+> 握手阶段的 `error` 为**明文帧**（第 4.3 节），业务 / 查询 / 管理阶段的 `error` 为**密封帧**
+> 并回带 `request_id`。
 
 ---
 
@@ -496,6 +593,8 @@ plugin → bot   verify.matched.ack { code:"MC-8F3K2A", consumed:true }
 - [ ] 业务消息处理：`verify.watch` → 群消息监听 → 群成员校验 → `verify.matched`
 - [ ] 群消息命中后按需**撤回**（收到 `verify.matched.ack` 后）
 - [ ] 业务消息处理：`query.account` / `query.lookup` / `query.history` / `query.binding-history`（按响应 `request_id` 关联）
+- [ ] 业务消息处理：`query.stats`（含 `range` 活跃度趋势）/ `query.accounts.list` / `query.sessions.list` / `query.audit.list`
+- [ ] 管理消息处理：`admin.*`（锁定 / 改密 / 删除 / 踢出 / 清会话 / 解绑），带 `confirm_name` 二次确认
 - [ ] 通过全部测试向量
 
 ---

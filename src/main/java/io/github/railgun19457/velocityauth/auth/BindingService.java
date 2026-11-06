@@ -1,6 +1,7 @@
 package io.github.railgun19457.velocityauth.auth;
 
 import io.github.railgun19457.velocityauth.config.VelocityAuthConfig;
+import io.github.railgun19457.velocityauth.storage.AuditContext;
 import io.github.railgun19457.velocityauth.storage.StorageService;
 import io.github.railgun19457.velocityauth.storage.model.Account;
 import io.github.railgun19457.velocityauth.storage.model.AuditEntry;
@@ -114,6 +115,17 @@ public final class BindingService {
     // ------------------------------------------------------------------ 解绑
 
     public CompletableFuture<AuthOutcomes.Bind> unbind(Account account, String providerId, String ip) {
+        return unbind(account, providerId, ip, AuditEntry.UNBIND, AuditContext.plugin());
+    }
+
+    /**
+     * 解绑指定渠道。
+     *
+     * @param action 审计动作标识（{@code unbind} / {@code admin_unbind}）
+     * @param audit  审计上下文
+     */
+    public CompletableFuture<AuthOutcomes.Bind> unbind(Account account, String providerId, String ip,
+                                                      String action, AuditContext audit) {
         return async.supply(() -> {
             try {
                 Optional<Binding> existing = storage.bindings().find(account.id(), providerId);
@@ -125,7 +137,8 @@ public final class BindingService {
                 bindingIndex.remove(account.id(), providerId);
                 storage.bindingHistory().insert(account.id(), providerId, existing.get().identifier(),
                         BindingHistory.UNBIND, now, ip);
-                storage.audit().log(now, account.id(), AuditEntry.UNBIND, ip, "provider=" + providerId);
+                storage.audit().log(now, account.id(), action, ip, "provider=" + providerId,
+                        audit.actor(), audit.source(), audit.clientId());
                 log.info("账号 {} 解绑渠道 {}", account.name(), providerId);
                 return AuthOutcomes.Bind.success(null);
             } catch (RuntimeException e) {

@@ -126,10 +126,23 @@ public record VelocityAuthConfig(
 
     // ---------------------------------------------------------------- bot 通道
 
-    public record Bot(boolean enabled, String listen, int port, Pairing pairing, Query query) {
+    public record Bot(boolean enabled, String listen, int port, Pairing pairing, Query query, Admin admin) {
     }
 
     public record Pairing(int ttlSeconds, int maxAttempts, String bootstrapCode) {
+    }
+
+    /**
+     * bot 侧账号管理（{@code admin.*} 写接口，PROTOCOL.md 8.2）。
+     *
+     * @param enabled             是否启用；默认关闭。启用后插件在 capabilities 里声明 {@code admin.v1}
+     * @param clients             允许发送 {@code admin.*} 的 client_id 白名单；空列表表示允许所有已配对客户端
+     * @param readOnly            只读模式：拒绝一切写操作（便于先只开管理页观察）
+     * @param maxPageSize         列表类接口单页最大条数
+     * @param rateLimitPerMinute  单个客户端每分钟最多发送多少条 {@code admin.*}
+     */
+    public record Admin(boolean enabled, List<String> clients, boolean readOnly, int maxPageSize,
+                        int rateLimitPerMinute) {
     }
 
     /**
@@ -339,6 +352,15 @@ public record VelocityAuthConfig(
         if (maxResults < 1) {
             throw new ConfigException("bot.query.max-results", "必须为正数");
         }
+        ConfigNode adminNode = botNode.section("admin");
+        int maxPageSize = adminNode.intValue("max-page-size", 100);
+        if (maxPageSize < 1) {
+            throw new ConfigException("bot.admin.max-page-size", "必须为正数");
+        }
+        int adminRateLimit = adminNode.intValue("rate-limit-per-minute", 120);
+        if (adminRateLimit < 1) {
+            throw new ConfigException("bot.admin.rate-limit-per-minute", "必须为正数");
+        }
         Bot bot = new Bot(
                 botNode.bool("enabled", false),
                 botNode.string("listen", "0.0.0.0"),
@@ -349,7 +371,13 @@ public record VelocityAuthConfig(
                         pairingNode.string("bootstrap-code", "")),
                 new Query(
                         queryNode.bool("enabled", false),
-                        maxResults));
+                        maxResults),
+                new Admin(
+                        adminNode.bool("enabled", false),
+                        List.copyOf(adminNode.stringListOrScalar("clients", List.of())),
+                        adminNode.bool("read-only", false),
+                        maxPageSize,
+                        adminRateLimit));
 
         ConfigNode proxyNode = root.section("proxy");
         Proxy proxy = new Proxy(
