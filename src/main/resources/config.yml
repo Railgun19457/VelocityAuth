@@ -1,4 +1,4 @@
-# version: 3
+# version: 4
 # ============ VelocityAuth 配置 ============
 # 修改后可用 /vauth reload 热重载（bot.* 除外，改动需重启代理）。
 
