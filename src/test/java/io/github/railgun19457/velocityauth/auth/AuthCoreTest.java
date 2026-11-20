@@ -104,9 +104,8 @@ class AuthCoreTest {
         UUID uuid = UUID.randomUUID();
         AuthSession session = new AuthSession("Test2", "1.2.3.4");
         assertFalse(session.authenticated());
-        registry.stage(uuid, session);
-        assertTrue(registry.get(uuid).isPresent());
+        registry.stage(uuid, new java.net.InetSocketAddress("127.0.0.1", 25565), session);
         assertTrue(registry.authenticatedSessions().isEmpty());
-        assertNotEquals(0, registry.size());
+        assertEquals(0, registry.size());
     }
 }

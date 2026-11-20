@@ -9,7 +9,6 @@ import io.github.railgun19457.velocityauth.VelocityAuthPlugin;
 import io.github.railgun19457.velocityauth.auth.AuthSession;
 import io.github.railgun19457.velocityauth.auth.AuthSessionRegistry;
 import io.github.railgun19457.velocityauth.storage.model.Account;
-import io.github.railgun19457.velocityauth.util.Addresses;
 
 /**
  * 玩家生命周期：登录后挂载会话、未认证提示、断开时清理。
@@ -33,19 +32,12 @@ public final class PlayerLifecycleListener {
             return;
         }
         Player player = event.getPlayer();
-        AuthSession session = registry.attach(player.getUniqueId(), player).orElseGet(() -> {
-            AuthSession created = new AuthSession(player.getUsername(), Addresses.ipOf(player));
-            created.player(player);
-            registry.stage(player.getUniqueId(), created);
-            return created;
-        });
-
-        if (session.authenticated()) {
+        registry.attach(player).filter(AuthSession::authenticated).ifPresent(session -> {
             Account account = session.account();
             if (account != null) {
                 plugin.authService().recordSessionAsync(account.id(), session.ip());
             }
-        }
+        });
         // 未认证提示不在这里发：PostLoginEvent 早于 JoinGame，1.20.2+ 客户端此时还没进入
         // play 状态，聊天包会被丢弃。改在 ServerPostConnectEvent（见下）发送。
     }
@@ -91,7 +83,7 @@ public final class PlayerLifecycleListener {
             return;
         }
         Player player = event.getPlayer();
-        AuthSession session = registry.remove(player.getUniqueId()).orElse(null);
+        AuthSession session = registry.remove(player).orElse(null);
         if (session == null) {
             return;
         }

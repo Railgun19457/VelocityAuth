@@ -389,6 +389,42 @@ public final class AccountRepository {
     }
 
     /** 按状态分组的账号数（status → count）。 */
+    public long onlineMillis(long accountId) {
+        return database.withConnection(connection -> {
+            try (PreparedStatement ps = connection.prepareStatement(
+                    "SELECT total_ms FROM account_online_time WHERE account_id = ?")) {
+                ps.setLong(1, accountId);
+                try (ResultSet rs = ps.executeQuery()) {
+                    return rs.next() ? rs.getLong(1) : 0L;
+                }
+            }
+        });
+    }
+
+    /** 增量在同一事务内提交；账号若已删除则跳过。 */
+    public void addOnlineMillis(Map<Long, Long> elapsedByAccount) {
+        boolean mysql = database.dialect() == Database.Dialect.MYSQL;
+        String sql = "INSERT INTO account_online_time (account_id, total_ms)"
+                + " SELECT id, ? FROM accounts WHERE id = ?"
+                + (mysql
+                    ? " ON DUPLICATE KEY UPDATE total_ms = total_ms + ?"
+                    : " ON CONFLICT(account_id) DO UPDATE SET total_ms = total_ms + excluded.total_ms");
+        database.inTransaction(connection -> {
+            try (PreparedStatement ps = connection.prepareStatement(sql)) {
+                for (var entry : elapsedByAccount.entrySet()) {
+                    ps.setLong(1, entry.getValue());
+                    ps.setLong(2, entry.getKey());
+                    if (mysql) {
+                        ps.setLong(3, entry.getValue());
+                    }
+                    ps.addBatch();
+                }
+                ps.executeBatch();
+            }
+            return null;
+        });
+    }
+
     public Map<String, Integer> countByStatus() {
         return database.withConnection(connection -> {
             try (PreparedStatement ps = connection.prepareStatement(

@@ -89,6 +89,15 @@ class AccountQueryHandlerTest {
     }
 
     @Test
+    void accountPayloadIncludesAccumulatedOnlineTime() {
+        storage.accounts().addOnlineMillis(Map.of(accountId, 3_661_999L));
+        QueryResponse response = handler.handle("query.account", Map.of("by", "name", "value", "alice"));
+        assertEquals(3661L, response.payload().get("online_seconds"));
+        var detail = com.google.gson.JsonParser.parseString((String) response.payload().get("data")).getAsJsonObject();
+        assertEquals(3661L, detail.get("online_seconds").getAsLong());
+    }
+
+    @Test
     void lookupByQqReturnsAccountNames() {
         QueryResponse response = handler.handle("query.lookup", Map.of("by", "qq", "value", "10001"));
         assertEquals(true, response.payload().get("found"));

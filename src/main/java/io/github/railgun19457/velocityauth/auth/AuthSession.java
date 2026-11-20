@@ -19,6 +19,8 @@ public final class AuthSession {
     private volatile boolean authenticated;
     private volatile long authenticatedAt;
     private volatile Player player;
+    private OnlineTimeTracker onlineTime;
+    private boolean disconnected;
 
     /**
      * 「注册后必须绑定」场景下，放行本连接对某个账号执行 {@code /bind} 的凭据。
@@ -68,21 +70,47 @@ public final class AuthSession {
         return player;
     }
 
-    public void player(Player player) {
+    synchronized void attach(Player player, OnlineTimeTracker onlineTime) {
         this.player = player;
+        this.onlineTime = onlineTime;
+        if (account != null && onlineTime != null) {
+            onlineTime.connected(account.id());
+        }
+    }
+
+    synchronized void disconnect() {
+        if (!disconnected && account != null && onlineTime != null) {
+            onlineTime.disconnected(account.id());
+        }
+        disconnected = true;
     }
 
     /** 标记为已认证（账号身份）。 */
-    public void authenticate(Account account) {
+    public synchronized boolean authenticate(Account account) {
+        if (disconnected) {
+            return false;
+        }
+        if (onlineTime != null && (this.account == null || this.account.id() != account.id())) {
+            if (this.account != null) {
+                onlineTime.disconnected(this.account.id());
+            }
+            onlineTime.connected(account.id());
+        }
         this.account = account;
         this.authenticated = true;
         this.authenticatedAt = System.currentTimeMillis();
+        return true;
     }
 
-    public void deauthenticate() {
+    public synchronized Account deauthenticate() {
+        Account previous = account;
+        if (!disconnected && previous != null && onlineTime != null) {
+            onlineTime.disconnected(previous.id());
+        }
         this.account = null;
         this.authenticated = false;
         this.authenticatedAt = 0L;
+        return previous;
     }
 
     /** 放行本连接对该账号的预登录 {@code /bind}（见 {@link #preLoginBindingAllowed}）。 */

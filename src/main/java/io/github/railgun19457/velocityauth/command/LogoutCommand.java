@@ -24,10 +24,7 @@ public final class LogoutCommand extends PlayerCommandSupport {
             return;
         }
         AuthSession session = sessionOf(player);
-        Account account = session == null ? null : session.account();
-        if (session != null) {
-            session.deauthenticate();
-        }
+        Account account = session == null ? null : session.deauthenticate();
         var reconnectMessage = plugin.lang().msg("command.logout.reconnect");
         player.sendMessage(plugin.lang().msg("command.logout.success"));
 

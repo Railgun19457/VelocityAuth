@@ -216,6 +216,9 @@ public final class AdminCommand implements SimpleCommand {
                 view.lastLoginAt() == null ? plugin.lang().raw("admin.account.none")
                         : TIME_FORMAT.format(Instant.ofEpochSecond(view.lastLoginAt()))
                                 + " (" + (view.lastIp() == null ? "?" : view.lastIp()) + ")"));
+        long seconds = view.onlineSeconds();
+        source.sendMessage(plugin.lang().msg("admin.account.info-online-time",
+                "hours", seconds / 3600, "minutes", seconds / 60 % 60, "seconds", seconds % 60));
     }
 
     private Optional<Account> findAccount(String name) {

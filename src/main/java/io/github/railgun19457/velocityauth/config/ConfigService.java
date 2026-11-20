@@ -2,7 +2,7 @@ package io.github.railgun19457.velocityauth.config;
 
 import io.github.railgun19457.velocityauth.auth.Provider;
 import io.github.railgun19457.velocityauth.config.VelocityAuthConfig.Domain;
-import io.github.railgun19457.velocityauth.util.ReleasedResource;
+import io.github.railgun19457.velocityauth.util.YamlUpgrade;
 import org.slf4j.Logger;
 import org.yaml.snakeyaml.LoaderOptions;
 import org.yaml.snakeyaml.Yaml;
@@ -10,10 +10,7 @@ import org.yaml.snakeyaml.constructor.SafeConstructor;
 import org.yaml.snakeyaml.error.YAMLException;
 
 import java.io.IOException;
-import java.io.InputStream;
-import java.io.Reader;
-import java.nio.charset.StandardCharsets;
-import java.nio.file.Files;
+import java.io.StringReader;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -25,7 +22,7 @@ import java.util.Objects;
 /**
  * 配置加载 / 校验 / 热重载。
  * <p>
- * 首次启动时从 jar 内释放默认模板 {@code config.yml} 到数据目录；已存在则不覆盖。
+ * 首次启动释放模板，旧配置按键迁移，校验通过后才保存。
  */
 public final class ConfigService {
 
@@ -35,8 +32,13 @@ public final class ConfigService {
     private final Class<?> resourceAnchor;
     private final Logger logger;
 
-    private volatile VelocityAuthConfig config;
-    private volatile List<String> warnings = List.of();
+    private volatile Loaded current;
+
+    private record Loaded(VelocityAuthConfig config, List<String> warnings) {
+    }
+
+    public record Prepared(VelocityAuthConfig config, List<String> warnings, YamlUpgrade.Prepared file) {
+    }
 
     public ConfigService(Path dataDirectory, Class<?> resourceAnchor, Logger logger) {
         Objects.requireNonNull(dataDirectory, "dataDirectory");
@@ -50,52 +52,79 @@ public final class ConfigService {
     }
 
     public VelocityAuthConfig config() {
-        VelocityAuthConfig current = config;
-        if (current == null) {
+        Loaded loaded = current;
+        if (loaded == null) {
             throw new IllegalStateException("配置尚未加载");
         }
-        return current;
+        return loaded.config();
     }
 
     public List<String> warnings() {
-        return warnings;
-    }
-
-    /** 首次启动释放默认模板，并在内置版本更新时释放/升级；返回是否新建。 */
-    public boolean releaseDefaultIfMissing() {
-        ReleasedResource.Outcome outcome = ReleasedResource.release(
-                resourceAnchor, DEFAULT_RESOURCE, configFile, false, logger);
-        switch (outcome) {
-            case CREATED -> logger.info("[VelocityAuth] 已释放默认配置到 {}", configFile);
-            case NEW_AVAILABLE -> logger.warn("[VelocityAuth] 内置配置模板已更新，新模板已写出到 {}.new，"
-                    + "请自行比对合并（不会自动覆盖你的配置，避免冲掉 SMTP 授权码等凭据）", configFile);
-            default -> {
-            }
-        }
-        return outcome == ReleasedResource.Outcome.CREATED;
+        Loaded loaded = current;
+        return loaded == null ? List.of() : loaded.warnings();
     }
 
     /** 加载（或重载）配置，失败时抛出 {@link ConfigException} 并保留旧配置。 */
-    public VelocityAuthConfig load() throws IOException {
-        releaseDefaultIfMissing();
-        Map<String, Object> root = readYaml(configFile);
-        VelocityAuthConfig parsed = VelocityAuthConfig.from(ConfigNode.root(root));
-        List<String> collected = validate(parsed);
-        this.config = parsed;
-        this.warnings = List.copyOf(collected);
-        for (String warning : collected) {
+    public synchronized VelocityAuthConfig load() throws IOException {
+        Prepared prepared = prepare();
+        prepared.file().save(logger);
+        publish(prepared);
+        return prepared.config();
+    }
+
+    public Prepared prepare() throws IOException {
+        YamlUpgrade.Prepared file;
+        try {
+            file = YamlUpgrade.prepare(resourceAnchor, DEFAULT_RESOURCE, configFile, ConfigService::upgradeKeys);
+        } catch (YAMLException e) {
+            throw new ConfigException("", "YAML 解析失败：" + e.getMessage(), e);
+        }
+        VelocityAuthConfig parsed = VelocityAuthConfig.from(ConfigNode.root(readYaml(file.content())));
+        return new Prepared(parsed, List.copyOf(validate(parsed)), file);
+    }
+
+    public void publish(Prepared prepared) {
+        current = new Loaded(prepared.config(), prepared.warnings());
+        for (String warning : prepared.warnings()) {
             logger.warn("配置提示：{}", warning);
         }
-        return parsed;
+    }
+
+    private static void upgradeKeys(int version, YamlUpgrade.Editor keys) {
+        boolean legacyQq = keys.has("binding.qq") || (!keys.has("binding.social")
+                && ((version >= 0 && version < 3) || keys.has("qqbot") || keys.has("verification.qq-code-length")));
+        String qqKey = keys.keyIgnoringCase("binding.social", "qq");
+        String qq = "binding.social." + qqKey;
+        keys.move("qqbot", "bot");
+        keys.move("binding.qq", qq);
+        keys.move(qq + ".max-accounts-per-qq", qq + ".max-accounts");
+        keys.move("binding.email.max-accounts-per-email", "binding.email.max-accounts");
+        keys.move("verification.email-code-length", "verification.code-length");
+        if (legacyQq || keys.has(qq)) {
+            keys.move("verification.qq-code-length", qq + ".code-length");
+        } else {
+            keys.remove("verification.qq-code-length");
+        }
+        keys.remove("auth.premium");
+        keys.remove("bot.group-id");
+        keys.remove("bot.private-number");
+        keys.remove("bot.require-group-member");
+        keys.fill(path -> switch (path) {
+            // 现有配置缺少这些键时的运行默认值，与新装模板的示例值不同。
+            case "binding.email.domain.list" -> false;
+            case "binding.social", "binding.social.qq", "binding.social.qq.display-name",
+                 "binding.social.qq.code-length" -> legacyQq && qqKey.equals("qq");
+            default -> true;
+        });
     }
 
     @SuppressWarnings("unchecked")
-    private Map<String, Object> readYaml(Path file) throws IOException {
+    private Map<String, Object> readYaml(String content) {
         LoaderOptions options = new LoaderOptions();
         options.setAllowDuplicateKeys(false);
         Yaml yaml = new Yaml(new SafeConstructor(options));
-        try (Reader reader = Files.newBufferedReader(file, StandardCharsets.UTF_8)) {
-            Object loaded = yaml.load(reader);
+        try {
+            Object loaded = yaml.load(new StringReader(content));
             if (loaded == null) {
                 return new LinkedHashMap<>();
             }

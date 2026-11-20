@@ -1,4 +1,4 @@
-# version: 7
+# version: 8
 # ============ VelocityAuth English language file ============
 # Text uses MiniMessage syntax; {xxx} are placeholders.
 prefix: "<gold>[Auth]</gold> "
@@ -172,6 +172,7 @@ admin:
     info-identities: "<gray>Identities: </gray><white>{value}</white>"
     info-created: "<gray>Created: </gray><white>{value}</white>"
     info-last-login: "<gray>Last login: </gray><white>{value}</white>"
+    info-online-time: "<gray>Total online time: </gray><white>{hours}h {minutes}m {seconds}s</white>"
     none: "<gray>none</gray>"
     password-set: "<green>Password for {account} has been reset.</green>"
     unbound: "<green>Unbound {type} from {account}.</green>"

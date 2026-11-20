@@ -157,6 +157,7 @@ public final class AccountQueryHandler implements BotQueryHandler {
         }
         out.put("identities", String.join(",", identities));
         out.put("online", onlineAccountIds.get().contains(view.id()));
+        out.put("online_seconds", view.onlineSeconds());
 
         // 详情用 data 补充身份时间与绑定明细，便于管理页直接渲染
         Map<String, Object> detail = new LinkedHashMap<>();
@@ -168,7 +169,8 @@ public final class AccountQueryHandler implements BotQueryHandler {
         detail.put("created_at", view.createdAt());
         detail.put("last_login_at", orZero(view.lastLoginAt()));
         detail.put("last_ip", orEmpty(view.lastIp()));
-        detail.put("online", onlineAccountIds.get().contains(view.id()));
+        detail.put("online", out.get("online"));
+        detail.put("online_seconds", view.onlineSeconds());
         List<Map<String, Object>> bindingRows = new ArrayList<>(view.bindings().size());
         for (Binding binding : view.bindings()) {
             Map<String, Object> row = new LinkedHashMap<>();

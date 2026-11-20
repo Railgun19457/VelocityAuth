@@ -149,7 +149,9 @@ public abstract class PlayerCommandSupport implements SimpleCommand {
             return false;
         }
         // 先认证：targetServer 要读「记忆的上次子服」，它取自 session.account()
-        session.authenticate(account);
+        if (!session.authenticate(account)) {
+            return false;
+        }
         // 免重连路径不会再触发 PostLogin，这里补记会话保持（否则同名登录无法免密重连）
         plugin.authService().recordSessionAsync(account.id(), session.ip());
         Optional<RegisteredServer> target = plugin.routing().targetServer(session);

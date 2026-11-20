@@ -19,7 +19,7 @@ import java.util.List;
 public final class Schema {
 
     /** 当前期望的 schema 版本。 */
-    public static final int CURRENT_VERSION = 5;
+    public static final int CURRENT_VERSION = 6;
 
     private Schema() {
     }
@@ -114,7 +114,7 @@ public final class Schema {
         return List.of("ALTER TABLE accounts DROP COLUMN premium_uuid");
     }
 
-    /** 按版本返回迁移语句。v1 初始建表；v2 登录历史；v3 绑定历史（解绑/注销后可追溯 + 冷却）；v4 移除 premium_uuid。 */
+    /** 按版本返回迁移语句。 */
     private static List<String> migrationStatements(Dialect dialect, int version) {
         return switch (version) {
             case 1 -> initialStatements(dialect);
@@ -122,6 +122,15 @@ public final class Schema {
             case 3 -> bindingHistoryStatements(dialect);
             case 4 -> dropPremiumUuidStatements(dialect);
             case 5 -> auditActorStatements(dialect);
+            case 6 -> List.of(dialect == Dialect.MYSQL
+                    ? "CREATE TABLE IF NOT EXISTS account_online_time ("
+                            + " account_id BIGINT NOT NULL PRIMARY KEY, total_ms BIGINT NOT NULL,"
+                            + " FOREIGN KEY (account_id) REFERENCES accounts(id) ON DELETE CASCADE"
+                            + ") ENGINE=InnoDB"
+                    : "CREATE TABLE IF NOT EXISTS account_online_time ("
+                            + " account_id INTEGER NOT NULL PRIMARY KEY, total_ms INTEGER NOT NULL,"
+                            + " FOREIGN KEY (account_id) REFERENCES accounts(id) ON DELETE CASCADE"
+                            + ")");
             default -> throw new StorageException("缺少 v" + version + " 的迁移脚本");
         };
     }

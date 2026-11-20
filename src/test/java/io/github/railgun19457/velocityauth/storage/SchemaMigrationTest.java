@@ -15,6 +15,7 @@ import java.util.List;
 import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
@@ -102,6 +103,29 @@ class SchemaMigrationTest {
             assertTrue(storage.accounts().existsByNameLower("a"));
         } finally {
             storage.close();
+        }
+    }
+
+    @Test
+    void addsOnlineTimeToAnExistingDatabase(@TempDir Path dir) throws Exception {
+        long id;
+        try (StorageService storage = StorageService.open(sqliteConfig(), dir,
+                org.slf4j.helpers.NOPLogger.NOP_LOGGER)) {
+            id = storage.accounts().insert("A", "a", UUID.randomUUID(), "h", AccountStatus.ACTIVE, 1L);
+            storage.database().inTransaction(connection -> {
+                try (Statement statement = connection.createStatement()) {
+                    statement.execute("DROP TABLE account_online_time");
+                    statement.execute("UPDATE va_meta SET value = '5' WHERE key = 'schema_version'");
+                }
+                return null;
+            });
+        }
+        try (StorageService storage = StorageService.open(sqliteConfig(), dir,
+                org.slf4j.helpers.NOPLogger.NOP_LOGGER)) {
+            assertTrue(storage.accounts().findById(id).isPresent());
+            assertEquals(0, storage.accounts().onlineMillis(id));
+            storage.accounts().addOnlineMillis(java.util.Map.of(id, 1234L));
+            assertEquals(1234, storage.accounts().onlineMillis(id));
         }
     }
 }

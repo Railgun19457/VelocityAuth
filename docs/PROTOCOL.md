@@ -403,8 +403,12 @@ plugin → bot   verify.matched.ack { code:"MC-8F3K2A", consumed:true }
 | `id` / `name` / `uuid` / `status` | int / string | 账号标识与状态 |
 | `last_server` / `last_ip` | string | 无则为空串 |
 | `created_at` / `last_login_at` | int | unix 秒；从未登录为 0 |
+| `online_seconds` | int | 账号累计在线秒数，包含查询时仍在线的时长；亦出现在 `data` 中 |
 | `bindings` | string | 每条 `provider:identifier:verified_at`，`;` 连接（如 `email:a@qq.com:1700000000;qq:10001:1700000001`） |
 | `identities` | string | 每条 `kind:identifier`（`java` / `bedrock`），`,` 连接 |
+
+累计在线按代理上的已认证时间计算，含免密重连。同一账号在同一代理上的重叠连接只计一次。
+历史账号从更新后开始累计。旧版 VelocityAuth 可以省略 `online_seconds`。
 
 `query.lookup`（`by` = `ip` 或**已配置的渠道 id**）→ `query.lookup.result`：
 `found`(bool)、`by`、`value`、`count`(int)、`accounts`（`,` 连接的账号名）。同一渠道标识可绑定多个账号

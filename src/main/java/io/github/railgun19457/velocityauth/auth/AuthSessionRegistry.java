@@ -1,7 +1,10 @@
 package io.github.railgun19457.velocityauth.auth;
 
 import com.velocitypowered.api.proxy.Player;
+import io.github.railgun19457.velocityauth.util.Addresses;
 
+import java.net.InetSocketAddress;
+import java.time.Duration;
 import java.util.Collection;
 import java.util.List;
 import java.util.Map;
@@ -13,36 +16,73 @@ import java.util.concurrent.ConcurrentHashMap;
  * 在线认证会话注册表。
  * <p>
  * 登录握手阶段（{@code GameProfileRequestEvent}）先 {@link #stage}，玩家对象创建后
- * （{@code PostLoginEvent}）再 {@link #attach}。key 统一使用玩家当前 profile 的 UUID。
+ * （{@code PostLoginEvent}）再 {@link #attach}。握手用地址和 UUID 匹配，
+ * 已接入的会话用实际 Player 对象区分新旧连接。
  */
 public final class AuthSessionRegistry {
 
-    private final Map<UUID, AuthSession> sessions = new ConcurrentHashMap<>();
+    private static final long STAGED_TIMEOUT_MS = Duration.ofMinutes(10).toMillis();
 
-    public void stage(UUID profileUuid, AuthSession session) {
-        sessions.put(profileUuid, session);
+    private record ConnectionKey(UUID profileUuid, InetSocketAddress address) {
     }
 
-    /** 玩家对象就绪；找不到暂存会话时返回空。 */
-    public Optional<AuthSession> attach(UUID profileUuid, Player player) {
-        AuthSession session = sessions.get(profileUuid);
-        if (session == null) {
+    private final Map<ConnectionKey, AuthSession> staged = new ConcurrentHashMap<>();
+    private final Map<UUID, AuthSession> sessions = new ConcurrentHashMap<>();
+    private final OnlineTimeTracker onlineTime;
+
+    public AuthSessionRegistry() {
+        this(null);
+    }
+
+    public AuthSessionRegistry(OnlineTimeTracker onlineTime) {
+        this.onlineTime = onlineTime;
+    }
+
+    public void stage(UUID profileUuid, InetSocketAddress address, AuthSession session) {
+        staged.put(new ConnectionKey(profileUuid, address), session);
+    }
+
+    public synchronized Optional<AuthSession> attach(Player player) {
+        UUID uuid = player.getUniqueId();
+        ConnectionKey key = new ConnectionKey(uuid, player.getRemoteAddress());
+        AuthSession previous = sessions.get(uuid);
+        if (!player.isActive()) {
+            staged.remove(key);
             return Optional.empty();
         }
-        session.player(player);
+        if (previous != null && previous.player() == player) {
+            return Optional.of(previous);
+        }
+        AuthSession session = staged.remove(key);
+        if (session == null) {
+            session = new AuthSession(player.getUsername(), Addresses.ipOf(player));
+        }
+        session.attach(player, onlineTime);
+        if (previous != null) {
+            previous.disconnect();
+        }
+        sessions.put(uuid, session);
         return Optional.of(session);
     }
 
-    public Optional<AuthSession> get(UUID profileUuid) {
-        return Optional.ofNullable(sessions.get(profileUuid));
-    }
-
     public Optional<AuthSession> get(Player player) {
-        return get(player.getUniqueId());
+        return Optional.ofNullable(sessions.get(player.getUniqueId()))
+                .filter(session -> session.player() == player);
     }
 
-    public Optional<AuthSession> remove(UUID profileUuid) {
-        return Optional.ofNullable(sessions.remove(profileUuid));
+    public synchronized Optional<AuthSession> remove(Player player) {
+        UUID uuid = player.getUniqueId();
+        staged.remove(new ConnectionKey(uuid, player.getRemoteAddress()));
+        return get(player).map(session -> {
+            sessions.remove(uuid);
+            session.disconnect();
+            return session;
+        });
+    }
+
+    public void purgeStaged() {
+        long cutoff = System.currentTimeMillis() - STAGED_TIMEOUT_MS;
+        staged.values().removeIf(session -> session.connectedAt() < cutoff);
     }
 
     public List<AuthSession> authenticatedSessions() {
@@ -51,7 +91,10 @@ public final class AuthSessionRegistry {
 
     public List<AuthSession> sessionsOfAccount(long accountId) {
         return sessions.values().stream()
-                .filter(s -> s.account() != null && s.account().id() == accountId)
+                .filter(session -> {
+                    var account = session.account();
+                    return account != null && account.id() == accountId;
+                })
                 .toList();
     }
 

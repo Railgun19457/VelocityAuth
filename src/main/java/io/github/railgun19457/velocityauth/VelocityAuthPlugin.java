@@ -8,6 +8,7 @@ import com.velocitypowered.api.plugin.Dependency;
 import com.velocitypowered.api.plugin.Plugin;
 import com.velocitypowered.api.plugin.annotation.DataDirectory;
 import com.velocitypowered.api.proxy.ProxyServer;
+import com.velocitypowered.api.scheduler.ScheduledTask;
 import io.github.railgun19457.velocityauth.admin.AdminService;
 import io.github.railgun19457.velocityauth.auth.AccountCache;
 import io.github.railgun19457.velocityauth.auth.AuthService;
@@ -15,6 +16,7 @@ import io.github.railgun19457.velocityauth.auth.AuthSession;
 import io.github.railgun19457.velocityauth.auth.AuthSessionRegistry;
 import io.github.railgun19457.velocityauth.auth.BindingIndex;
 import io.github.railgun19457.velocityauth.auth.BindingService;
+import io.github.railgun19457.velocityauth.auth.OnlineTimeTracker;
 import io.github.railgun19457.velocityauth.auth.PasswordHasher;
 import io.github.railgun19457.velocityauth.auth.PendingBindingStore;
 import io.github.railgun19457.velocityauth.auth.RateLimiter;
@@ -75,16 +77,17 @@ public final class VelocityAuthPlugin {
     private final Path dataDirectory;
     private final PluginLogger log;
 
-    private ConfigService configService;
-    private LangService langService;
+    private volatile RuntimeResources resources;
     private StorageService storage;
     private AsyncExecutor async;
     private AuthSessionRegistry sessionRegistry;
+    private OnlineTimeTracker onlineTime;
+    private ScheduledTask onlineTimeCheckpoint;
     private AuthService authService;
     private ReconnectService reconnectService;
     private VerificationService verificationService;
     private BindingService bindingService;
-    private EmailTemplateService emailTemplate;
+    private final EmailTemplateService emailTemplate;
     private RecoveryService recoveryService;
     private KeyStore keyStore;
     private PairingService pairingService;
@@ -98,25 +101,23 @@ public final class VelocityAuthPlugin {
 
     private volatile boolean enabled;
 
+    private record RuntimeResources(ConfigService config, LangService lang) {
+    }
+
     @Inject
     public VelocityAuthPlugin(ProxyServer server, Logger logger, @DataDirectory Path dataDirectory) {
         this.server = server;
         this.logger = logger;
         this.dataDirectory = dataDirectory;
         this.log = new PluginLogger(logger);
+        this.emailTemplate = new EmailTemplateService(dataDirectory, getClass(), logger);
     }
 
     @Subscribe
     public void onProxyInitialize(ProxyInitializeEvent event) {
         try {
-            this.configService = new ConfigService(dataDirectory, getClass(), logger);
-            boolean created = configService.releaseDefaultIfMissing();
-            if (created) {
-                log.info("已释放默认配置到 {}", configService.configFile());
-            }
-            VelocityAuthConfig config = configService.load();
-            LangService.releaseShipped(getClass(), dataDirectory, logger);
-            this.langService = LangService.load(config.language(), getClass(), dataDirectory, logger);
+            reload();
+            VelocityAuthConfig config = config();
 
             this.storage = StorageService.open(config.database(), dataDirectory, logger);
             this.async = new AsyncExecutor();
@@ -127,7 +128,9 @@ public final class VelocityAuthPlugin {
             cache.load();
             BindingIndex bindingIndex = new BindingIndex(storage.bindings(), log);
             bindingIndex.load();
-            this.queryService = new AccountQueryService(storage, cache);
+            OnlineTimeTracker tracker = new OnlineTimeTracker(storage.accounts());
+            this.onlineTime = tracker;
+            this.queryService = new AccountQueryService(storage, cache, tracker::totalMillis);
 
             PasswordHasher hasher = new PasswordHasher(config.auth().bcryptCost());
             PendingBindingStore pendingBindings = new PendingBindingStore();
@@ -135,14 +138,9 @@ public final class VelocityAuthPlugin {
             this.authService = new AuthService(this::config, storage, cache, bindingIndex, hasher, pendingBindings,
                     rateLimiter, floodgate, async, log);
             this.reconnectService = new ReconnectService(server, this, this::config, log);
-            this.sessionRegistry = new AuthSessionRegistry();
+            this.sessionRegistry = new AuthSessionRegistry(tracker);
 
             SmtpSender smtpSender = new SmtpSender(this::config, async, log);
-            this.emailTemplate = new EmailTemplateService(dataDirectory, getClass(), logger);
-            if (emailTemplate.releaseDefaultIfMissing()) {
-                log.info("已释放默认邮件模板到 {}", emailTemplate.file());
-            }
-            emailTemplate.load();
             this.keyStore = KeyStore.load(dataDirectory, log);
             this.pairingService = new PairingService();
             SocialVerificationGateway socialGateway = new BotSocialGateway(this::config, () -> botServer);
@@ -164,13 +162,22 @@ public final class VelocityAuthPlugin {
                         authService.purgeExpired();
                         verificationService.purgeExpired();
                         recoveryService.purgeExpired();
+                        sessionRegistry.purgeStaged();
                     })
                     .repeat(Duration.ofSeconds(60))
                     .schedule();
 
+            this.onlineTimeCheckpoint = server.getScheduler().buildTask(this, () -> {
+                try {
+                    tracker.flush();
+                } catch (RuntimeException e) {
+                    log.warn("保存在线时长失败，将在下一次保存时重试：{}", e.getMessage());
+                }
+            }).delay(Duration.ofMinutes(1)).repeat(Duration.ofMinutes(1)).schedule();
+
             this.enabled = true;
             log.info("VelocityAuth {} 已加载（语言 {}，数据库 {}，账号 {}）",
-                    BuildConstants.VERSION, langService.code(), storage.describe(), cache.size());
+                    BuildConstants.VERSION, lang().code(), storage.describe(), cache.size());
             log.info("服务器映射：登录服={} 主服={} 记忆上次子服={}",
                     config.servers().login(), config.servers().defaultServer(), config.servers().rememberLast());
         } catch (IOException e) {
@@ -249,6 +256,20 @@ public final class VelocityAuthPlugin {
 
     /** 释放组件（启动失败与正常关服共用；可重复调用）。 */
     private void shutdownComponents() {
+        ScheduledTask checkpoint = onlineTimeCheckpoint;
+        if (checkpoint != null) {
+            onlineTimeCheckpoint = null;
+            checkpoint.cancel();
+        }
+        OnlineTimeTracker tracker = onlineTime;
+        if (tracker != null) {
+            onlineTime = null;
+            try {
+                tracker.close();
+            } catch (RuntimeException e) {
+                log.warn("关服时保存在线时长失败：{}", e.getMessage());
+            }
+        }
         KeyStore keys = keyStore;
         if (keys != null) {
             keyStore = null;
@@ -276,11 +297,15 @@ public final class VelocityAuthPlugin {
     }
 
     /** 热重载配置、语言文件与邮件模板；失败时抛出，调用方负责提示。 */
-    public void reload() throws IOException {
-        VelocityAuthConfig config = configService.load();
-        LangService.releaseShipped(getClass(), dataDirectory, logger);
-        this.langService = LangService.load(config.language(), getClass(), dataDirectory, logger);
+    public synchronized void reload() throws IOException {
+        ConfigService configService = new ConfigService(dataDirectory, getClass(), logger);
+        ConfigService.Prepared config = configService.prepare();
+        LangService.Prepared lang = LangService.prepare(config.config().language(), getClass(), dataDirectory, logger);
+        config.file().save(logger);
+        lang.save(logger);
         emailTemplate.load();
+        configService.publish(config);
+        resources = new RuntimeResources(configService, lang.language());
     }
 
     public ProxyServer server() {
@@ -296,11 +321,11 @@ public final class VelocityAuthPlugin {
     }
 
     public ConfigService configService() {
-        return configService;
+        return resources.config();
     }
 
     public VelocityAuthConfig config() {
-        return configService.config();
+        return configService().config();
     }
 
     public StorageService storage() {
@@ -308,7 +333,7 @@ public final class VelocityAuthPlugin {
     }
 
     public LangService lang() {
-        return langService;
+        return resources.lang();
     }
 
     public AsyncExecutor async() {

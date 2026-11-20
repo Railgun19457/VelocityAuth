@@ -1,4 +1,4 @@
-# version: 7
+# version: 8
 # ============ VelocityAuth 中文语言文件 ============
 # 文本使用 MiniMessage 语法；{xxx} 为占位符。
 prefix: "<gold>[认证]</gold> "
@@ -172,6 +172,7 @@ admin:
     info-identities: "<gray>身份数：</gray><white>{value}</white>"
     info-created: "<gray>注册时间：</gray><white>{value}</white>"
     info-last-login: "<gray>上次登录：</gray><white>{value}</white>"
+    info-online-time: "<gray>累计在线：</gray><white>{hours} 小时 {minutes} 分 {seconds} 秒</white>"
     none: "<gray>无</gray>"
     password-set: "<green>已重置 {account} 的密码。</green>"
     unbound: "<green>已解绑 {account} 的 {type}。</green>"

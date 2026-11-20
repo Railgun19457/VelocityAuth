@@ -17,6 +17,7 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
+import java.util.function.LongUnaryOperator;
 
 /**
  * 玩家信息查询：账号详情、按渠道标识/IP 反查账号、登录历史、绑定历史。
@@ -28,10 +29,16 @@ public final class AccountQueryService {
 
     private final StorageService storage;
     private final AccountCache cache;
+    private final LongUnaryOperator onlineMillis;
 
     public AccountQueryService(StorageService storage, AccountCache cache) {
+        this(storage, cache, storage.accounts()::onlineMillis);
+    }
+
+    public AccountQueryService(StorageService storage, AccountCache cache, LongUnaryOperator onlineMillis) {
         this.storage = storage;
         this.cache = cache;
+        this.onlineMillis = onlineMillis;
     }
 
     /** 账号详情视图（含绑定与身份）。 */
@@ -45,7 +52,8 @@ public final class AccountQueryService {
             Long lastLoginAt,
             String lastIp,
             List<Binding> bindings,
-            List<IdentityView> identities
+            List<IdentityView> identities,
+            long onlineSeconds
     ) {
     }
 
@@ -113,7 +121,8 @@ public final class AccountQueryService {
                 account.lastLoginAt(),
                 account.lastIp(),
                 storage.bindings().findByAccountId(account.id()),
-                List.copyOf(identities));
+                List.copyOf(identities),
+                onlineMillis.applyAsLong(account.id()) / 1000L);
     }
 
     // ------------------------------------------------------------------ 反查

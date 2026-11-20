@@ -42,7 +42,8 @@ public final class LoginListener {
             return;
         }
         String connectionName = event.getUsername();
-        String ip = Addresses.ipOf(event.getConnection().getRemoteAddress());
+        var address = event.getConnection().getRemoteAddress();
+        String ip = Addresses.ipOf(address);
         GameProfile original = event.getGameProfile();
         IdentityResolver.Resolved identity = plugin.identities().resolve(original.getId(), connectionName);
 
@@ -61,7 +62,7 @@ public final class LoginListener {
         }
 
         // 3) 未认证：不改 profile，标记为未认证
-        registry.stage(original.getId(), new AuthSession(connectionName, ip));
+        registry.stage(original.getId(), address, new AuthSession(connectionName, ip));
     }
 
     /** 标记会话为「账号身份」并登记，profile 重写为账号规范身份。 */
@@ -70,6 +71,6 @@ public final class LoginListener {
         AuthSession session = new AuthSession(connectionName, ip);
         session.authenticate(account);
         event.setGameProfile(ProfileFactory.profileFor(account, original.getProperties()));
-        registry.stage(account.uuid(), session);
+        registry.stage(account.uuid(), event.getConnection().getRemoteAddress(), session);
     }
 }

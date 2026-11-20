@@ -1,6 +1,6 @@
-# version: 4
+# version: 5
 # ============ VelocityAuth 配置 ============
-# 修改后可用 /vauth reload 热重载（bot.* 除外，改动需重启代理）。
+# 修改后可用 /vauth reload 热重载（数据库连接和 bot 通道启停、监听、能力设置需重启代理）。
 
 language: zh_cn            # 语言：zh_cn | en_us；文案在 plugins/velocityauth/lang/<语言>.yml
 
