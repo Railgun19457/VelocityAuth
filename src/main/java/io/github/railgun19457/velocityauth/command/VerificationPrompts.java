@@ -72,7 +72,7 @@ public final class VerificationPrompts {
     }
 
     /**
-     * 邮箱域名规则提示：白名单 / 黑名单 / 不限。
+     * 邮箱名单提示。包含正则时只说明存在限制。
      * <p>
      * 用于玩家「选择绑定邮箱」时告知可用的邮箱类型。
      */
@@ -81,9 +81,17 @@ public final class VerificationPrompts {
         if (domain.mode() == VelocityAuthConfig.Domain.Mode.OFF || domain.list().isEmpty()) {
             return plugin.lang().msg("command.bind.email-domains-any");
         }
+        if (domain.hasAddressPatterns()) {
+            return plugin.lang().msg("command.bind.email-rules-hint");
+        }
         return plugin.lang().msg(
                 domain.mode() == VelocityAuthConfig.Domain.Mode.WHITELIST
                         ? "command.bind.email-domains-allow" : "command.bind.email-domains-deny",
                 "domains", String.join(", ", domain.list()));
+    }
+
+    public static net.kyori.adventure.text.Component emailRuleRejection(VelocityAuthPlugin plugin) {
+        return plugin.lang().msg(plugin.config().binding().email().domain().hasAddressPatterns()
+                ? "command.bind.email-rules-rejected" : "command.bind.domain-not-allowed");
     }
 }

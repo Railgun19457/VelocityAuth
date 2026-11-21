@@ -1,6 +1,7 @@
 package io.github.railgun19457.velocityauth.config;
 
 import io.github.railgun19457.velocityauth.VelocityAuthPlugin;
+import io.github.railgun19457.velocityauth.auth.EmailRules;
 import io.github.railgun19457.velocityauth.lang.LangService;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -238,7 +239,7 @@ class ResourceUpgradeTest {
         assertFalse(plan.language().has("auth.name-occupied"));
         assertFalse(plan.language().has("admin.status.qqbot"));
         String migrated = Files.readString(en);
-        assertTrue(migrated.startsWith("# version: 8\n# server language notes\n"));
+        assertTrue(migrated.startsWith("# version: 9\n# server language notes\n"));
         assertTrue(migrated.contains("# log out hint"));
         assertEquals(english, Files.readString(backups(en).getFirst()));
         assertTrue(Files.readString(zh).contains("admin:"));
@@ -301,5 +302,31 @@ class ResourceUpgradeTest {
         assertEquals("gated", plugin.config().servers().login());
         assertEquals("en_us", plugin.lang().code());
         assertEquals("Custom prefix", plugin.lang().rawText("prefix"));
+    }
+
+    @Test
+    void invalidEmailRegexKeepsThePreviouslyLoadedRules() throws Exception {
+        VelocityAuthPlugin plugin = new VelocityAuthPlugin(null, NOPLogger.NOP_LOGGER, directory);
+        Path path = config().configFile();
+        String configured = """
+                # version: 5
+                binding:
+                  email:
+                    domain:
+                      mode: whitelist
+                      list: ['regex:[0-9]+@qq\\.com']
+                """;
+        Files.writeString(path, configured);
+        plugin.reload();
+        var active = plugin.config();
+        assertEquals(EmailRules.DomainVerdict.ALLOWED,
+                EmailRules.check("123@qq.com", active.binding().email().domain()));
+        assertEquals(EmailRules.DomainVerdict.DOMAIN_NOT_ALLOWED,
+                EmailRules.check("name@qq.com", active.binding().email().domain()));
+
+        Files.writeString(path, configured.replace("[0-9]+@qq\\.com", "["));
+        var error = assertThrows(ConfigException.class, plugin::reload);
+        assertEquals("binding.email.domain.list[0]", error.fieldPath());
+        assertSame(active, plugin.config());
     }
 }

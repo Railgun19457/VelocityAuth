@@ -106,8 +106,59 @@ public record VelocityAuthConfig(
                                 int codeLength) {
     }
 
-    public record Domain(Mode mode, List<String> list) {
+    public static final class Domain {
+        private static final String REGEX_PREFIX = "regex:";
+
         public enum Mode { OFF, WHITELIST, BLACKLIST }
+
+        private final Mode mode;
+        private final List<String> list;
+        private final Set<String> exactDomains;
+        private final List<com.google.re2j.Pattern> addressPatterns;
+
+        public Domain(Mode mode, List<String> list) {
+            this.mode = mode;
+            this.list = List.copyOf(list);
+            Set<String> domains = new LinkedHashSet<>();
+            List<com.google.re2j.Pattern> patterns = new ArrayList<>();
+            for (int i = 0; i < this.list.size(); i++) {
+                String entry = this.list.get(i);
+                String rule = entry.stripLeading();
+                if (!rule.startsWith(REGEX_PREFIX)) {
+                    domains.add(entry.trim().toLowerCase(Locale.ROOT));
+                    continue;
+                }
+                String path = "binding.email.domain.list[" + i + "]";
+                String pattern = rule.substring(REGEX_PREFIX.length());
+                if (pattern.isBlank()) {
+                    throw new ConfigException(path, "regex: 后面必须填写正则表达式");
+                }
+                try {
+                    patterns.add(com.google.re2j.Pattern.compile(pattern));
+                } catch (com.google.re2j.PatternSyntaxException e) {
+                    throw new ConfigException(path, "邮箱正则无效：" + e.getMessage(), e);
+                }
+            }
+            exactDomains = Set.copyOf(domains);
+            addressPatterns = List.copyOf(patterns);
+        }
+
+        public Mode mode() {
+            return mode;
+        }
+
+        public List<String> list() {
+            return list;
+        }
+
+        public boolean hasAddressPatterns() {
+            return !addressPatterns.isEmpty();
+        }
+
+        public boolean matches(String domain, String normalizedAddress) {
+            return exactDomains.contains(domain) || addressPatterns.stream()
+                    .anyMatch(pattern -> pattern.matcher(normalizedAddress).matches());
+        }
     }
 
     // ---------------------------------------------------------------- verification

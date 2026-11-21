@@ -1,5 +1,6 @@
 package io.github.railgun19457.velocityauth.auth;
 
+import io.github.railgun19457.velocityauth.config.ConfigException;
 import io.github.railgun19457.velocityauth.config.VelocityAuthConfig;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
@@ -8,6 +9,7 @@ import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 @Timeout(30)
@@ -43,6 +45,34 @@ class EmailRulesTest {
     void blacklistRejectsListedDomain() {
         assertEquals(EmailRules.DomainVerdict.DOMAIN_NOT_ALLOWED, EmailRules.check("a@tempmail.com", BLACKLIST));
         assertEquals(EmailRules.DomainVerdict.ALLOWED, EmailRules.check("a@qq.com", BLACKLIST));
+    }
+
+    @Test
+    void mixedListMatchesAnExactDomainOrTheWholeNormalizedAddress() {
+        var entries = List.of(" Example.COM ", "regex:[0-9]+@qq\\.com");
+        var whitelist = new VelocityAuthConfig.Domain(VelocityAuthConfig.Domain.Mode.WHITELIST, entries);
+        var blacklist = new VelocityAuthConfig.Domain(VelocityAuthConfig.Domain.Mode.BLACKLIST, entries);
+        var off = new VelocityAuthConfig.Domain(VelocityAuthConfig.Domain.Mode.OFF, entries);
+
+        assertEquals(EmailRules.DomainVerdict.ALLOWED, EmailRules.check(" 123@QQ.COM ", whitelist));
+        assertEquals(EmailRules.DomainVerdict.ALLOWED, EmailRules.check("team@example.com", whitelist));
+        assertEquals(EmailRules.DomainVerdict.DOMAIN_NOT_ALLOWED, EmailRules.check("name123@qq.com", whitelist));
+        assertEquals(EmailRules.DomainVerdict.DOMAIN_NOT_ALLOWED, EmailRules.check("123+alt@qq.com", whitelist));
+        assertEquals(EmailRules.DomainVerdict.DOMAIN_NOT_ALLOWED, EmailRules.check("123@qq.com.example", whitelist));
+        assertEquals(EmailRules.DomainVerdict.DOMAIN_NOT_ALLOWED, EmailRules.check("team@sub.example.com", whitelist));
+        assertEquals(EmailRules.DomainVerdict.DOMAIN_NOT_ALLOWED, EmailRules.check("123@qq.com", blacklist));
+        assertEquals(EmailRules.DomainVerdict.ALLOWED, EmailRules.check("name123@qq.com", blacklist));
+        assertEquals(EmailRules.DomainVerdict.ALLOWED, EmailRules.check("name123@qq.com", off));
+    }
+
+    @Test
+    void invalidRegexReportsTheListEntry() {
+        for (String invalid : List.of("regex:", "regex:[", "regex:(?=qq)")) {
+            var error = assertThrows(ConfigException.class, () ->
+                    new VelocityAuthConfig.Domain(VelocityAuthConfig.Domain.Mode.WHITELIST,
+                            List.of("example.com", invalid)));
+            assertEquals("binding.email.domain.list[1]", error.fieldPath());
+        }
     }
 
     @Test

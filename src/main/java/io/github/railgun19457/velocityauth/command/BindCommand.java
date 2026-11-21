@@ -102,7 +102,7 @@ public final class BindCommand extends PlayerCommandSupport {
             return;
         }
         if (verdict == EmailRules.DomainVerdict.DOMAIN_NOT_ALLOWED) {
-            player.sendMessage(plugin.lang().msg("command.bind.domain-not-allowed"));
+            player.sendMessage(VerificationPrompts.emailRuleRejection(plugin));
             player.sendMessage(VerificationPrompts.emailDomainHint(plugin));
             return;
         }
@@ -203,7 +203,7 @@ public final class BindCommand extends PlayerCommandSupport {
             case SUCCESS -> plugin.lang().msg("command.bind.success");
             case ALREADY_BOUND -> plugin.lang().msg("command.bind.already-bound");
             case EMAIL_INVALID -> plugin.lang().msg("command.bind.email-invalid");
-            case DOMAIN_NOT_ALLOWED -> plugin.lang().msg("command.bind.domain-not-allowed");
+            case DOMAIN_NOT_ALLOWED -> VerificationPrompts.emailRuleRejection(plugin);
             case LIMIT -> plugin.lang().msg("command.bind.limit", "provider", provider.displayName());
             case COOLDOWN -> plugin.lang().msg("command.bind.cooldown");
             case DISABLED -> plugin.lang().msg("generic.feature-disabled");

@@ -18,7 +18,7 @@ import java.util.function.Supplier;
 /**
  * 绑定 / 解绑编排（DESIGN 6.1 / 6.2 / 6.4）。
  * <p>
- * 渠道无关：邮箱（{@code email}）走域名校验，社交渠道由 bot 证明持有后写入。
+ * 渠道无关：邮箱（{@code email}）走邮箱名单校验，社交渠道由 bot 证明持有后写入。
  * 只负责落库与基数 / 冷却校验；"证明身份"由 {@code VerificationService} 完成。
  */
 public final class BindingService {

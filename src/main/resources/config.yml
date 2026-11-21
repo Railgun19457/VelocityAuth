@@ -54,8 +54,11 @@ binding:
     max-accounts: 1                  # 同一邮箱最多绑定几个账号
     cooldown-minutes: 0              # 该邮箱解绑/注销后的再绑定冷却（分钟，0 = 不启用）
     domain:
-      mode: whitelist                # off | whitelist | blacklist（按 @ 之后的域名精确匹配）
+      mode: whitelist                # off 跳过名单；白名单命中任意项放行，黑名单命中任意项拒绝
+      # 普通条目精确匹配域名；regex: 以 RE2/J 匹配完整邮箱（先去首尾空格并转小写）。
       list: ["qq.com"]
+      # 只允许纯数字 QQ 邮箱时，用下行替换上面的 list：
+      # list: ['regex:[0-9]+@qq\.com']
   social:                    # 通用社交渠道：键名即 provider id（可自行增加任意平台）
     qq:
       enabled: true

@@ -1,4 +1,4 @@
-# version: 8
+# version: 9
 # ============ VelocityAuth English language file ============
 # Text uses MiniMessage syntax; {xxx} are placeholders.
 prefix: "<gold>[Auth]</gold> "
@@ -55,6 +55,8 @@ command:
     email-domains-allow: "<gray>Supported email domains: {domains}</gray>"
     email-domains-deny: "<gray>Blocked email domains: {domains}</gray>"
     email-domains-any: "<gray>Any email domain is allowed.</gray>"
+    email-rules-hint: "<gray>The server applies additional rules to email addresses.</gray>"
+    email-rules-rejected: "<red>That email address is not allowed by the server's rules.</red>"
     email-invalid: "<red>Invalid email address.</red>"
     domain-not-allowed: "<red>That email domain is not allowed.</red>"
     limit: "<red>This {provider} has reached the maximum number of bound accounts.</red>"

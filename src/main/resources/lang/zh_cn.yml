@@ -1,4 +1,4 @@
-# version: 8
+# version: 9
 # ============ VelocityAuth 中文语言文件 ============
 # 文本使用 MiniMessage 语法；{xxx} 为占位符。
 prefix: "<gold>[认证]</gold> "
@@ -55,6 +55,8 @@ command:
     email-domains-allow: "<gray>支持的邮箱域名：{domains}</gray>"
     email-domains-deny: "<gray>禁止使用的邮箱域名：{domains}</gray>"
     email-domains-any: "<gray>邮箱域名不限。</gray>"
+    email-rules-hint: "<gray>此服务器对邮箱地址设有额外限制。</gray>"
+    email-rules-rejected: "<red>该邮箱地址不符合服务器的邮箱规则。</red>"
     email-invalid: "<red>邮箱地址格式不正确。</red>"
     domain-not-allowed: "<red>该邮箱域名不被允许。</red>"
     limit: "<red>该 {provider} 已绑定的账号数已达上限。</red>"

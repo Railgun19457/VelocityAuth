@@ -24,6 +24,7 @@ dependencies {
 
     // 运行时依赖（shade + relocate）
     implementation 'org.yaml:snakeyaml:2.2'
+    implementation 'com.google.re2j:re2j:1.8'
     implementation 'com.google.code.gson:gson:2.11.0'
     implementation 'at.favre.lib:bcrypt:0.10.2'
     implementation 'com.zaxxer:HikariCP:5.1.0'
@@ -95,6 +96,7 @@ shadowJar {
     duplicatesStrategy = DuplicatesStrategy.INCLUDE
     mergeServiceFiles()
     relocate 'org.yaml.snakeyaml', 'io.github.railgun19457.velocityauth.lib.snakeyaml'
+    relocate 'com.google.re2j',    'io.github.railgun19457.velocityauth.lib.re2j'
     relocate 'com.google.gson',     'io.github.railgun19457.velocityauth.lib.gson'
     relocate 'at.favre.lib',        'io.github.railgun19457.velocityauth.lib.bcrypt'
     relocate 'com.zaxxer.hikari',   'io.github.railgun19457.velocityauth.lib.hikari'
